@@ -38,7 +38,15 @@ const createCategory = async (req, res) => {
 
 const updateCategory = async (req, res) => {
   try {
-    const category = await Category.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const toArray = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map((v) => v.trim()).filter(Boolean);
+      return val.split(',').map((v) => v.trim()).filter(Boolean);
+    };
+    const update = { ...req.body };
+    if (update.processOwners !== undefined) update.processOwners = toArray(update.processOwners);
+    if (update.ccEmails !== undefined) update.ccEmails = toArray(update.ccEmails);
+    const category = await Category.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     if (!category) return errorResponse(res, 'Category not found', 404);
     return successResponse(res, { category }, 'Category updated');
   } catch (err) {

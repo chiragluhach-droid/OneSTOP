@@ -1,4 +1,4 @@
-const buildApprovalEmail = ({
+const buildCCInfoEmail = ({
   stageName,
   studentName,
   studentEmail,
@@ -9,10 +9,7 @@ const buildApprovalEmail = ({
   subject,
   description,
   attachments,
-  resolvedUrl,
-  rejectUrl,
-  forwardUrl,
-  canForward,
+  processOwnerEmail,
 }) => {
   const attachmentLinks =
     attachments && attachments.length > 0
@@ -20,21 +17,6 @@ const buildApprovalEmail = ({
           `<a href="${a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
-
-  const actionButtons = `
-    <a href="${rejectUrl}"
-       style="display:inline-block;padding:13px 26px;background:#c0392b;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
-      ✗ Reject
-    </a>
-    <a href="${resolvedUrl}"
-       style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
-      ✓ Resolved
-    </a>
-    ${canForward && forwardUrl ? `
-    <a href="${forwardUrl}"
-       style="display:inline-block;padding:13px 26px;background:#1E3A8A;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-bottom:10px;">
-      → Forward
-    </a>` : ''}`;
 
   return `
 <!DOCTYPE html>
@@ -52,24 +34,25 @@ const buildApprovalEmail = ({
         </tr>
         <tr>
           <td style="padding:16px 32px 0;">
-            <span style="background:#e67e22;color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;">Action Required</span>
+            <span style="background:#475569;color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;">For Your Information (CC)</span>
           </td>
         </tr>
         <tr>
           <td style="padding:20px 32px 0;">
-            <p style="margin:0;font-size:16px;color:#222;">Dear <strong>Process Owner</strong>,</p>
+            <p style="margin:0;font-size:15px;color:#222;">This is an <strong>informational copy</strong> of a student request.</p>
             <p style="margin:10px 0 0;font-size:14px;color:#555;">
-              A student request has been routed to you for action. Please review the details and take appropriate action using the buttons below.
+              The request has been routed to <strong>${processOwnerEmail}</strong> for action.
+              No action is required from you on this email.
             </p>
           </td>
         </tr>
         <tr>
           <td style="padding:20px 32px;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf5f5;border-left:4px solid #8B1A1A;border-radius:6px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-left:4px solid #475569;border-radius:6px;">
               <tr>
                 <td style="padding:16px 20px;">
                   <p style="margin:0 0 4px;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;">Ticket ID</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:#8B1A1A;">#${ticketId}</p>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#475569;">#${ticketId}</p>
                   <p style="margin:4px 0 0;font-size:12px;color:#888;">${stageName}</p>
                 </td>
               </tr>
@@ -115,26 +98,16 @@ const buildApprovalEmail = ({
           </td>
         </tr>
         <tr>
-          <td style="padding:16px 32px 0;">
+          <td style="padding:16px 32px 24px;">
             <p style="margin:0 0 8px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;">Attachments</p>
             <div style="font-size:13px;">${attachmentLinks}</div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:32px;">
-            <p style="margin:0 0 16px;font-size:14px;color:#333;font-weight:700;">Take Action:</p>
-            <div style="flex-wrap:wrap;">${actionButtons}</div>
-            <p style="margin:20px 0 0;font-size:12px;color:#aaa;">
-              These links expire in 72 hours and can only be used once.
-              ${canForward ? '<br><strong>Forward</strong> sends to the next process owner. <strong>Resolved</strong> closes the request.' : ''}
-            </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
               OneSTOP — Manav Rachna University | Automated Workflow Platform<br>
-              Do not reply to this email directly.
+              This is an automated informational copy. No action needed.
             </p>
           </td>
         </tr>
@@ -145,4 +118,4 @@ const buildApprovalEmail = ({
 </html>`;
 };
 
-module.exports = { buildApprovalEmail };
+module.exports = { buildCCInfoEmail };

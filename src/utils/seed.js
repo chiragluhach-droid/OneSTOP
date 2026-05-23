@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Admin = require('../models/Admin');
 const School = require('../models/School');
 const Category = require('../models/Category');
+const Teacher = require('../models/Teacher');
 const User = require('../models/User');
 const Request = require('../models/Request');
 const WorkflowStage = require('../models/WorkflowStage');
@@ -18,113 +19,62 @@ const seed = async () => {
   await mongoose.connect(process.env.MONGO_URI);
   console.log('\n🌱 OneSTOP Seed Script — Manav Rachna University\n');
 
-  // ── Wipe workflow data only (preserve admin + student) ──
-  section('Clearing workflow data');
+  // ── Wipe entire database (fresh start) ──
+  section('Clearing database');
   await Promise.all([
     School.deleteMany({}),
     Category.deleteMany({}),
+    Teacher.deleteMany({}),
     Request.deleteMany({}),
     WorkflowStage.deleteMany({}),
     ApprovalToken.deleteMany({}),
     ApprovalAction.deleteMany({}),
     Notification.deleteMany({}),
     AuditLog.deleteMany({}),
+    User.deleteMany({}),
+    Admin.deleteMany({}),
   ]);
-  log('Schools, categories, requests, workflow data cleared');
+  log('Entire database cleared');
 
-  // ── Admin (upsert — preserve existing) ──
+  // ── Admin (create fresh) ──
   section('Admin');
   const adminEmail = process.env.ADMIN_EMAIL || 'luhachchirag@gmail.com';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123secure';
-  await Admin.findOneAndUpdate(
-    { email: adminEmail },
-    { name: 'OneSTOP Admin', email: adminEmail, password: adminPassword, role: 'superadmin' },
-    { upsert: true, new: true }
-  );
-  log(`Admin preserved/created: ${adminEmail}`);
+  await Admin.create({
+    name: 'OneSTOP Admin',
+    email: adminEmail,
+    password: adminPassword,
+    role: 'superadmin',
+  });
+  log(`Admin created: ${adminEmail}`);
 
-  // ── Student (upsert — preserve existing) ──
+  // ── Student (create fresh) ──
   section('Student');
-  await User.findOneAndUpdate(
-    { email: 'chiragluhach@gmail.com' },
-    {
-      name: 'Chirag Luhach',
-      email: 'chiragluhach@gmail.com',
-      collegeId: 'MRU2024001',
-      phone: '9876543210',
-      department: 'Computer Science & Engineering',
-      year: 2,
-      role: 'student',
-      isActive: true,
-    },
-    { upsert: true, new: true }
-  );
-  log('Student preserved/created: chiragluhach@gmail.com');
+  await User.create({
+    name: 'Chirag Luhach',
+    email: 'chiragluhach@gmail.com',
+    collegeId: 'MRU2024001',
+    phone: '9876543210',
+    department: 'Computer Science & Engineering',
+    year: 2,
+    role: 'student',
+    isActive: true,
+  });
+  log('Student created: chiragluhach@gmail.com');
 
-  // ── Schools (from MRU routing matrix) ──
+  // ── Schools ──
   section('Schools');
   const schoolDefs = [
-    {
-      name: 'School of Engineering (CST)',
-      code: 'CST',
-      description: 'Computer Science & Technology',
-      hodEmail: 'hodcst@mru.edu.in',
-      deanEmail: 'deanengg@mru.edu.in',
-    },
-    {
-      name: 'Electronics & Communication Engineering',
-      code: 'ECE',
-      description: 'Electronics & Communication Engineering',
-      hodEmail: 'hodece@mru.edu.in',
-      deanEmail: 'deanengg@mru.edu.in',
-    },
-    {
-      name: 'Mechanical Engineering',
-      code: 'ME',
-      description: 'Mechanical Engineering',
-      hodEmail: 'hodme@mru.edu.in',
-      deanEmail: 'deanengg@mru.edu.in',
-    },
-    {
-      name: 'Robotics',
-      code: 'ROB',
-      description: 'Robotics Engineering',
-      hodEmail: 'hodrobotics@mru.edu.in',
-      deanEmail: 'deanengg@mru.edu.in',
-    },
-    {
-      name: 'School of Sciences',
-      code: 'SOS',
-      description: 'Sciences and Research',
-      hodEmail: 'hodsciences@mru.edu.in',
-      deanEmail: 'deansciences@mru.edu.in',
-    },
-    {
-      name: 'School of Law',
-      code: 'LAW',
-      description: 'Law',
-      hodEmail: 'hodlaw@mru.edu.in',
-      deanEmail: 'dean.law@mru.edu.in',
-    },
-    {
-      name: 'School of Management',
-      code: 'MGT',
-      description: 'Management & Commerce',
-      hodEmail: 'hodmgt@mru.edu.in',
-      deanEmail: 'deanmgt@mru.edu.in',
-    },
-    {
-      name: 'Education & Humanities',
-      code: 'EDU',
-      description: 'Education & Humanities',
-      hodEmail: 'hodeducation@mru.edu.in',
-      deanEmail: 'deaneducation@mru.edu.in',
-    },
+    { name: 'School of Engineering',            code: 'SOE', description: 'Engineering and Technology',   deanEmail: 'deanengg@mru.edu.in' },
+    { name: 'School of Business',               code: 'SOB', description: 'Business and Management',     deanEmail: 'deanmgt@mru.edu.in' },
+    { name: 'School of Law',                    code: 'SOL', description: 'Law and Legal Studies',       deanEmail: 'dean.law@mru.edu.in' },
+    { name: 'School of Education & Humanities', code: 'SEH', description: 'Education and Humanities',   deanEmail: 'deaneducation@mru.edu.in' },
+    { name: 'School of Sciences',               code: 'SOS', description: 'Sciences and Research',       deanEmail: 'deansciences@mru.edu.in' },
   ];
 
   for (const s of schoolDefs) {
-    await School.findOneAndUpdate({ code: s.code }, s, { upsert: true, new: true });
-    log(`${s.code} — ${s.name} (HOD: ${s.hodEmail})`);
+    await School.create(s);
+    log(`${s.code} — ${s.name}`);
   }
 
   // ── Categories (from MRU routing matrix) ──
@@ -213,8 +163,8 @@ const seed = async () => {
   ];
 
   for (const c of categoryDefs) {
-    await Category.findOneAndUpdate({ code: c.code }, c, { upsert: true, new: true });
-    log(`${c.icon}  ${c.name} → ${c.processOwners.join(', ')} | CC: ${c.ccEmails.join(', ')}`);
+    await Category.create(c);
+    log(`${c.icon}  ${c.name}`);
   }
 
   // ── Summary ──
@@ -226,12 +176,6 @@ const seed = async () => {
   console.log('\n  Test Student     →  Chirag Luhach');
   console.log('  Student Email    →  chiragluhach@gmail.com');
   console.log('  College ID       →  MRU2024001');
-  console.log('\n  Flow to test:');
-  console.log('  1. Open mobile app → login with chiragluhach@gmail.com');
-  console.log('  2. Raise Request → select category → select school → submit');
-  console.log('  3. Email routed to category process owner with CC');
-  console.log('  4. Click Approve & Forward → goes to HOD');
-  console.log('  5. HOD → Dean → Dean Academics → Resolved');
   console.log('─'.repeat(60) + '\n');
 
   process.exit(0);

@@ -8,8 +8,6 @@ const { sendApprovalEmail } = require('../services/workflowService');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
 
-const DEAN_ACADEMICS_EMAIL = 'deanacademics@mru.edu.in';
-
 const createRequest = async (req, res) => {
   try {
     const { categoryId, schoolId, subject, description } = req.body;
@@ -25,6 +23,11 @@ const createRequest = async (req, res) => {
     if (!category) return errorResponse(res, 'Category not found', 404);
     if (!school) return errorResponse(res, 'School not found', 404);
 
+    const processOwners = (category.processOwners || []).filter(Boolean);
+    if (processOwners.length === 0) {
+      return errorResponse(res, 'This category has no process owners configured. Please contact admin.', 400);
+    }
+
     const attachments = (req.files || []).map((f) => ({
       url: f.path,
       publicId: f.filename,
@@ -39,6 +42,14 @@ const createRequest = async (req, res) => {
       exists = await Request.findOne({ ticketId });
     }
 
+    const totalStages = processOwners.length;
+
+    // CC = school dean + category CC (dean gets informed, not action emails)
+    const ccEmails = [
+      ...(school.deanEmail ? [school.deanEmail] : []),
+      ...(category.ccEmails || []),
+    ].filter(Boolean);
+
     const request = await Request.create({
       ticketId,
       student: req.user._id,
@@ -49,46 +60,28 @@ const createRequest = async (req, res) => {
       attachments,
       status: 'pending',
       currentStageIndex: 0,
-      totalStages: 4,
+      totalStages,
     });
 
-    // Build 4 stages from DB — routing is fully data-driven
-    const stageDefinitions = [
-      {
-        stageIndex: 0,
-        stageName: 'Initial Review',
-        recipientEmails: category.processOwners,
-        ccEmails: category.ccEmails,
-      },
-      {
-        stageIndex: 1,
-        stageName: 'HOD Review',
-        recipientEmails: school.hodEmail ? [school.hodEmail] : [],
-        ccEmails: category.ccEmails,
-      },
-      {
-        stageIndex: 2,
-        stageName: 'Dean Review',
-        recipientEmails: school.deanEmail ? [school.deanEmail] : [],
-        ccEmails: category.ccEmails,
-      },
-      {
-        stageIndex: 3,
-        stageName: 'Academic Review',
-        recipientEmails: [DEAN_ACADEMICS_EMAIL],
-        ccEmails: category.ccEmails,
-      },
-    ];
+    // One stage per process owner — routing purely from category data
+    const stageDefinitions = processOwners.map((ownerEmail, idx) => ({
+      stageIndex: idx,
+      stageName: `Stage ${idx + 1} — ${category.name}`,
+      recipientEmails: [ownerEmail],
+      ccEmails,
+    }));
 
     const stages = await WorkflowStage.insertMany(
       stageDefinitions.map((s) => ({ ...s, request: request._id, status: 'pending' }))
     );
 
+    const canForward = totalStages > 1; // stage 0 can forward to stage 1 if multiple owners
+
     await sendApprovalEmail({
       request,
       workflowStage: stages[0],
       stageIndex: 0,
-      isFinalStage: false,
+      canForward,
       student: req.user,
       category,
       school,

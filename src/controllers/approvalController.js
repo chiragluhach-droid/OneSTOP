@@ -11,7 +11,7 @@ const { sendApprovalEmail } = require('../services/workflowService');
 const { buildStudentNotificationEmail } = require('../templates/studentNotificationEmail');
 const auditLog = require('../utils/auditLogger');
 
-const VALID_ACTIONS = ['approve_forward', 'approve_final', 'reject'];
+const VALID_ACTIONS = ['forward', 'resolved', 'reject'];
 
 const handleApprovalAction = async (req, res) => {
   const { token } = req.params;
@@ -41,11 +41,7 @@ const handleApprovalAction = async (req, res) => {
     const { request, workflowStage } = approvalToken;
 
     if (['resolved', 'rejected'].includes(request.status)) {
-      return res.status(400).send(buildResultPage('error', 'This request has already been resolved or rejected.'));
-    }
-
-    if (act === 'reject' && approvalToken.isFinalStage) {
-      return res.status(400).send(buildResultPage('error', 'Final stage only allows approval.'));
+      return res.status(400).send(buildResultPage('error', 'This request has already been closed.'));
     }
 
     approvalToken.isUsed = true;
@@ -56,10 +52,10 @@ const handleApprovalAction = async (req, res) => {
     let stageStatus;
     let requestStatus;
 
-    if (act === 'approve_final') {
+    if (act === 'resolved') {
       stageStatus = 'approved_final';
       requestStatus = 'resolved';
-    } else if (act === 'approve_forward') {
+    } else if (act === 'forward') {
       stageStatus = 'approved_forwarded';
       requestStatus = 'in_review';
     } else {
@@ -91,17 +87,15 @@ const handleApprovalAction = async (req, res) => {
       updateData.rejectedAt = new Date();
       updateData.rejectionReason = remarks;
     }
-    if (act === 'approve_forward') {
+    if (act === 'forward') {
       updateData.currentStageIndex = approvalToken.stageIndex + 1;
     }
     await Request.findByIdAndUpdate(request._id, updateData);
 
-    // If approved & forwarded, send email to next stage
-    if (act === 'approve_forward') {
-      const nextStage = await WorkflowStage.findOne({
-        request: request._id,
-        stageIndex: approvalToken.stageIndex + 1,
-      });
+    // Forward → send action email to next process owner
+    if (act === 'forward') {
+      const nextStageIndex = approvalToken.stageIndex + 1;
+      const nextStage = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex });
 
       if (nextStage) {
         const [student, category, school] = await Promise.all([
@@ -110,13 +104,15 @@ const handleApprovalAction = async (req, res) => {
           School.findById(request.school),
         ]);
 
-        const isNextFinal = approvalToken.stageIndex + 1 >= request.totalStages - 1;
+        // canForward = there is yet another stage after the next one
+        const stageAfterNext = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex + 1 });
+        const canForward = !!stageAfterNext;
 
         await sendApprovalEmail({
           request,
           workflowStage: nextStage,
           stageIndex: nextStage.stageIndex,
-          isFinalStage: isNextFinal,
+          canForward,
           student,
           category,
           school,
@@ -127,18 +123,16 @@ const handleApprovalAction = async (req, res) => {
     const student = await User.findById(request.student);
 
     const notifTitle =
-      requestStatus === 'resolved'
-        ? 'Request Resolved'
-        : requestStatus === 'rejected'
-        ? 'Request Rejected'
-        : `Request Forwarded to ${workflowStage.stageName}`;
+      requestStatus === 'resolved' ? 'Request Resolved'
+      : requestStatus === 'rejected' ? 'Request Rejected'
+      : 'Request Forwarded';
 
     const notifBody =
       requestStatus === 'resolved'
         ? `Your request #${request.ticketId} has been resolved.`
         : requestStatus === 'rejected'
         ? `Your request #${request.ticketId} was rejected${remarks ? ': ' + remarks : '.'}`
-        : `Your request #${request.ticketId} has been approved at ${workflowStage.stageName} and forwarded for further review.`;
+        : `Your request #${request.ticketId} has been forwarded to the next process owner for review.`;
 
     await Notification.create({
       user: student._id,
@@ -172,10 +166,10 @@ const handleApprovalAction = async (req, res) => {
     });
 
     const successMessage =
-      act === 'approve_final'
-        ? 'You have successfully approved and resolved this request. The student has been notified.'
-        : act === 'approve_forward'
-        ? 'Request approved and forwarded to the next stage. The student has been notified.'
+      act === 'resolved'
+        ? 'You have marked this request as Resolved. The student has been notified.'
+        : act === 'forward'
+        ? 'Request forwarded to the next process owner. The student has been notified.'
         : 'Request rejected. The student has been notified.';
 
     return res.status(200).send(buildResultPage('success', successMessage, request.ticketId, act));
@@ -191,10 +185,10 @@ const buildResultPage = (type, message, ticketId, action) => {
   const color = isSuccess ? '#1a7a3a' : '#c0392b';
   const bgColor = isSuccess ? '#d5f5e3' : '#fde8e8';
   const actionLabel =
-    action === 'approve_final'
-      ? 'Approved & Resolved'
-      : action === 'approve_forward'
-      ? 'Approved & Forwarded'
+    action === 'resolved'
+      ? 'Resolved'
+      : action === 'forward'
+      ? 'Forwarded'
       : 'Rejected';
 
   return `<!DOCTYPE html>
