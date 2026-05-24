@@ -11,7 +11,9 @@ const protect = async (req, res, next) => {
     }
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
-    const user = await User.findById(decoded.id).select('-otp -otpExpiresAt -refreshToken');
+    const user = await User.findById(decoded.id)
+      .select('-otp -otpExpiresAt -refreshToken')
+      .populate('school', 'name code');
     if (!user || !user.isActive) {
       return errorResponse(res, 'User not found or inactive', 401);
     }
@@ -60,7 +62,9 @@ const protectAny = async (req, res, next) => {
       req.admin = admin;
       req.user = null;
     } else {
-      const user = await User.findById(decoded.id).select('-otp -otpExpiresAt -refreshToken');
+      const user = await User.findById(decoded.id)
+        .select('-otp -otpExpiresAt -refreshToken')
+        .populate('school', 'name code');
       if (!user || !user.isActive) return errorResponse(res, 'User not found or inactive', 401);
       req.user = user;
     }

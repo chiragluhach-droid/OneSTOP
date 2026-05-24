@@ -8,6 +8,15 @@ const auditLog = require('../utils/auditLogger');
 const OTP_EXPIRES_MINUTES = 10;
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
 
+const userPayload = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  rollNumber: user.rollNumber,
+  department: user.department,
+  school: user.school ? { _id: user.school._id, name: user.school.name, code: user.school.code } : null,
+});
+
 const sendOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -15,14 +24,9 @@ const sendOtp = async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    let user = await User.findOne({ email: normalizedEmail });
-
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      user = new User({
-        email: normalizedEmail,
-        name: normalizedEmail.split('@')[0],
-        collegeId: normalizedEmail.split('@')[0].toUpperCase(),
-      });
+      return errorResponse(res, 'You are not registered in the system. Please contact admin.', 404);
     }
 
     if (user.lastOtpSentAt) {
@@ -62,7 +66,7 @@ const verifyOtp = async (req, res) => {
     const { email, otp } = req.body;
     if (!email || !otp) return errorResponse(res, 'Email and OTP are required', 400);
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    const user = await User.findOne({ email: email.toLowerCase().trim() }).populate('school', 'name code');
     if (!user) return errorResponse(res, 'User not found', 404);
 
     if (!user.otp || !user.otpExpiresAt) {
@@ -103,15 +107,7 @@ const verifyOtp = async (req, res) => {
     return successResponse(res, {
       accessToken,
       refreshToken,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        collegeId: user.collegeId,
-        phone: user.phone,
-        department: user.department,
-        year: user.year,
-      },
+      user: userPayload(user),
     }, 'Login successful');
   } catch (err) {
     console.error('verifyOtp error:', err);
@@ -125,7 +121,7 @@ const refreshTokens = async (req, res) => {
     if (!refreshToken) return errorResponse(res, 'Refresh token required', 400);
 
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).populate('school', 'name code');
     if (!user || user.refreshToken !== refreshToken) {
       return errorResponse(res, 'Invalid refresh token', 401);
     }
@@ -153,44 +149,21 @@ const logout = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { name, phone, department, year, expoPushToken } = req.body;
+    const { name, expoPushToken } = req.body;
     const user = req.user;
 
     if (name) user.name = name.trim();
-    if (phone) user.phone = phone.trim();
-    if (department) user.department = department.trim();
-    if (year) user.year = parseInt(year);
     if (expoPushToken) user.expoPushToken = expoPushToken;
 
     await user.save();
-    return successResponse(res, {
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        collegeId: user.collegeId,
-        phone: user.phone,
-        department: user.department,
-        year: user.year,
-      },
-    }, 'Profile updated');
+    return successResponse(res, { user: userPayload(user) }, 'Profile updated');
   } catch (err) {
     return errorResponse(res, 'Profile update failed', 500);
   }
 };
 
 const getMe = async (req, res) => {
-  return successResponse(res, {
-    user: {
-      _id: req.user._id,
-      name: req.user.name,
-      email: req.user.email,
-      collegeId: req.user.collegeId,
-      phone: req.user.phone,
-      department: req.user.department,
-      year: req.user.year,
-    },
-  });
+  return successResponse(res, { user: userPayload(req.user) });
 };
 
 const buildOtpEmail = (name, otp) => `

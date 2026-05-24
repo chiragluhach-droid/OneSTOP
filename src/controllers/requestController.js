@@ -10,14 +10,18 @@ const auditLog = require('../utils/auditLogger');
 
 const createRequest = async (req, res) => {
   try {
-    const { categoryId, schoolId, subject, description } = req.body;
-    if (!categoryId || !schoolId || !subject || !description) {
+    const { categoryId, subject, description } = req.body;
+    if (!categoryId || !subject || !description) {
       return errorResponse(res, 'All fields are required', 400);
+    }
+
+    if (!req.user.school) {
+      return errorResponse(res, 'Your account has no school assigned. Please contact admin.', 400);
     }
 
     const [category, school] = await Promise.all([
       Category.findById(categoryId),
-      School.findById(schoolId),
+      School.findById(req.user.school._id || req.user.school),
     ]);
 
     if (!category) return errorResponse(res, 'Category not found', 404);
@@ -195,7 +199,7 @@ const adminGetAllRequests = async (req, res) => {
 
     const [requests, total] = await Promise.all([
       Request.find(filter)
-        .populate('student', 'name email collegeId')
+        .populate('student', 'name email rollNumber')
         .populate('category', 'name code')
         .populate('school', 'name code')
         .sort({ createdAt: -1 })

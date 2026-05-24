@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
-const generateApprovalToken = (requestId, stageIndex, teacherEmail) => {
-  const payload = `${requestId}:${stageIndex}:${teacherEmail}:${Date.now()}`;
+const generateApprovalToken = (requestId, stageIndex, recipientEmail) => {
+  const payload = `${requestId}:${stageIndex}:${recipientEmail}:${Date.now()}`;
   const secret = process.env.APPROVAL_TOKEN_SECRET;
   const hmac = crypto.createHmac('sha256', secret);
   hmac.update(payload);

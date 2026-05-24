@@ -8,11 +8,11 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth');
 const adminAuthRoutes = require('./routes/adminAuth');
 const schoolRoutes = require('./routes/schools');
-const teacherRoutes = require('./routes/teachers');
 const categoryRoutes = require('./routes/categories');
 const requestRoutes = require('./routes/requests');
 const approvalRoutes = require('./routes/approvals');
 const notificationRoutes = require('./routes/notifications');
+const adminStudentRoutes = require('./routes/adminStudents');
 
 const app = express();
 
@@ -41,11 +41,11 @@ app.use('/api/auth/send-otp', otpLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/schools', schoolRoutes);
-app.use('/api/teachers', teacherRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/students', adminStudentRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'OneSTOP backend is running', timestamp: new Date().toISOString() });
