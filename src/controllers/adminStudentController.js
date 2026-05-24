@@ -56,7 +56,7 @@ const getStudentStats = async (req, res) => {
           as: 'schoolDoc',
         },
       },
-      { $unwind: { path: '$schoolDoc', preserveNullAndEmpty: true } },
+      { $unwind: { path: '$schoolDoc', preserveNullAndEmptyArrays: true } },
       {
         $group: {
           _id: '$_id.school',
