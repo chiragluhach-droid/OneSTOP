@@ -33,8 +33,8 @@ const createRequest = async (req, res) => {
     }
 
     const attachments = (req.files || []).map((f) => ({
-      url: f.path,
-      publicId: f.filename,
+      url: f.location,
+      publicId: f.key,
       originalName: f.originalname,
       mimeType: f.mimetype,
     }));

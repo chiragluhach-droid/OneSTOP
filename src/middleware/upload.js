@@ -1,13 +1,16 @@
 const multer = require('multer');
-const cloudinary = require('../config/cloudinary');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const multerS3 = require('multer-s3');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const s3 = require('../config/s3');
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'onestop/attachments',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt'],
-    resource_type: 'auto',
+const storage = multerS3({
+  s3,
+  bucket: process.env.AWS_S3_BUCKET,
+  contentType: multerS3.AUTO_CONTENT_TYPE,
+  key: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `onestop/attachments/${uuidv4()}${ext}`);
   },
 });
 
