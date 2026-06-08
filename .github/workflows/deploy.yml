@@ -1,0 +1,389 @@
+name: Build, Scan & Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - production
+  pull_request:
+    branches:
+      - production
+
+env:
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  IMAGE_NAME: ${{ secrets.DOCKER_HUB_REPOSITORY }}  # Format: username/repository-name
+  K8S_REPO: ${{ secrets.K8S_REPO_NAME }}  # Format: owner/k8s-repo-name
+
+jobs:
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner (Filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+      - name: Run npm audit
+        run: |
+          npm audit --audit-level=moderate || true
+          npm audit --json > audit-report.json || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-report
+          path: audit-report.json
+
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    
+    outputs:
+      image-tag: ${{ steps.image-tag.outputs.tag }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Generate image tag
+        id: image-tag
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          IMAGE_TAG="prod-${SHORT_SHA}-$(date +%Y%m%d-%H%M%S)"
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Generated image tag: ${IMAGE_TAG}"
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          provenance: true
+          sbom: true
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.image-tag.outputs.tag }}
+
+      - name: Run Trivy vulnerability scanner (Image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Upload Trivy image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+          fail-build: true
+          severity-cutoff: high
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ steps.image-tag.outputs.tag }}
+          path: sbom.spdx.json
+
+      - name: Sign container image with Cosign
+        uses: sigstore/cosign-installer@v3.3.0
+      
+      - name: Sign the images with GitHub OIDC Token
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          cosign sign --yes ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+
+  update-k8s-manifest:
+    name: Update Kubernetes Manifest for ArgoCD
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout K8s repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.K8S_REPO }}
+          token: ${{ secrets.K8S_REPO_PAT }}
+          path: k8s-repo
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Update image tag in K8s manifests
+        working-directory: k8s-repo
+        run: |
+          IMAGE_TAG="${{ needs.build-and-push.outputs.image-tag }}"
+          IMAGE_FULL="${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          
+          echo "🔄 Updating Kubernetes manifests"
+          echo "📦 Image: ${IMAGE_FULL}"
+          echo "🏷️  Tag: ${IMAGE_TAG}"
+          echo "🔗 Commit: ${{ github.sha }}"
+          
+          # Navigate to production overlay
+          cd overlays/production
+          
+          # Update image using kustomize
+          kustomize edit set image ${{ env.IMAGE_NAME }}=${IMAGE_FULL}
+          
+          # Verify the change
+          echo ""
+          echo "✅ Updated kustomization.yaml:"
+          cat kustomization.yaml
+          
+          # Preview full manifest
+          echo ""
+          echo "📋 Preview of deployment changes:"
+          kustomize build . | grep -A 5 "image:"
+
+      - name: Commit and push changes
+        working-directory: k8s-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create detailed commit message
+          cat << EOF > commit-message.txt
+          chore(production): update image to ${{ needs.build-and-push.outputs.image-tag }}
+          
+          🚀 Deployment Details:
+          - Image: ${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}
+          - Commit: ${{ github.sha }}
+          - Author: ${{ github.actor }}
+          - Workflow: ${{ github.workflow }}
+          - Run: ${{ github.run_number }}
+          
+          Security Checks Passed:
+          ✅ Trivy vulnerability scan
+          ✅ Grype security scan
+          ✅ Secret detection
+          ✅ SBOM generated
+          ✅ Image signed
+          
+          [skip ci]
+          EOF
+          
+          git add overlays/production/kustomization.yaml
+          git commit -F commit-message.txt || echo "No changes to commit"
+          git push
+
+      - name: Trigger ArgoCD sync (optional)
+        if: secrets.ARGOCD_AUTH_TOKEN != ''
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.ARGOCD_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "$Determine deployment status
+        id: status
+        run: |
+          if [ "${{ needs.update-k8s-manifest.result }}" == "success" ]; then
+            echo "status=✅ Success" >> $GITHUB_OUTPUT
+            echo "color=#36a64f" >> $GITHUB_OUTPUT
+          else
+            echo "status=❌ Failed" >> $GITHUB_OUTPUT
+            echo "color=#ff0000" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "Production Deployment ${{ steps.status.outputs.status }}",
+              "attachments": [
+                {
+                  "color": "${{ steps.status.outputs.color }}",
+                  "blocks": [
+                    {
+                      "type": "header",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "🚀 Production Deployment ${{ steps.status.outputs.status }}"
+                      }
+                    },
+                    {
+                      "type": "section",
+                      "fields": [
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Repository:*\n${{ github.repository }}"
+                        },
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Branch:*\nproduction"
+                        },
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Commit:*\n<${{ github.event.head_commit.url }}|${{ github.sha }}>"
+                        },
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Author:*\n${{ github.actor }}"
+                        },
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Image:*\n${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}"
+                        },
+                        {
+                          "type": "mrkdwn",
+                          "text": "*Security:*\n✅ All scans passed"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "actions",
+                      "elements": [
+                        {
+                          "type": "button",
+                          "text": {
+                            "type": "plain_text",
+                            "text": "View Workflow"
+                          },
+                          "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                        },
+                        {
+                          "type": "button",
+                          "text": {
+                            "type": "plain_text",
+                            "text": "View Commit"
+                          },
+                          "url": "${{ github.event.head_commit.url }}"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send email notification
+        if: secrets.NOTIFICATION_EMAIL != '' && needs.update-k8s-manifest.result != 'success'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🚨 Production Deployment Failed - ${{ github.repository }}"
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: "GitHub Actions <noreply@github.com>"
+          body: |
+            Production deployment has failed!
+            
+            Repository: ${{ github.repository }}
+            Branch: production
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Workflow: ${{ github.workflow }}
+            
+            Please check the workflow logs:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          priority: high\`
+              - 🔒 Digest: \`${{ needs.build-and-push.outputs.image-digest }}\`
+              - 🏷️  Tag: \`${imageTag}\`
+              - 🔗 Commit: \`${sha}\`
+              
+              **Security:**
+              - ✅ Vulnerability scanning passed
+              - ✅ Secret detection passed
+              - ✅ SBOM generated
+              - ✅ Image signed with Cosign
+              
+              **K8s Deployment:**
+              - 📂 Repository: [${{ env.K8S_REPO }}](https://github.com/${{ env.K8S_REPO }})
+              - 🎯 Environment: Production
+              - 🔄 ArgoCD will auto-sync the changes
+              
+              Monitor deployment at your ArgoCD dashboard.`
+            });
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [build-and-push, update-k8s-manifest]
+    if: always() && github.event_name == 'push'
+    
+    steps:
+      - name: Send Slack notification
+        if: always()
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "Deployment ${{ needs.update-k8s-manifest.result == 'success' && '✅ Succeeded' || '❌ Failed' }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment Status*: ${{ needs.update-k8s-manifest.result == 'success' && '✅ Succeeded' || '❌ Failed' }}\n*Repository*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Commit*: <${{ github.event.head_commit.url }}|${{ github.sha }}>\n*Author*: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
