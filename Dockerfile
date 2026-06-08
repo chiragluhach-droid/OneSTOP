@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 
 # Add security labels
 LABEL maintainer="your-team@example.com"
-LABEL org.opencontainers.image.source="https://github.com/your-org/onestop_backend"
+LABEL org.opencontainers.image.source="https://github.com/manavrachna-university/onestop_backend-main.git"
 LABEL org.opencontainers.image.description="OneStop Backend Service"
 LABEL org.opencontainers.image.licenses="MIT"
 
