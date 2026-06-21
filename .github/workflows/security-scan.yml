@@ -8,6 +8,12 @@ on:
     branches:
       - production
 
+env:
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+  IMAGE_NAME: ${{ secrets.DOCKER_HUB_REPOSITORY }}
+  K8S_REPO: ${{ secrets.K8S_REPO_NAME }}
+
 permissions:
   contents: read
   security-events: write

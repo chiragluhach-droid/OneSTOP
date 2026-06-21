@@ -10,8 +10,18 @@ on:
 
 env:
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
   IMAGE_NAME: ${{ secrets.DOCKER_HUB_REPOSITORY }}  # Format: username/repository-name
   K8S_REPO: ${{ secrets.K8S_REPO_NAME }}  # Format: owner/k8s-repo-name
+  K8S_REPO_PAT: ${{ secrets.K8S_REPO_PAT }}
+  ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+  ARGOCD_SYNC_URL: ${{ secrets.ARGOCD_SYNC_URL }}
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+  SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+  SMTP_PORT: ${{ secrets.SMTP_PORT }}
+  SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+  SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
 
 jobs:
   security-scan:
@@ -76,8 +86,8 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_TOKEN }}
 
       - name: Generate image tag
         id: image-tag
@@ -164,7 +174,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.K8S_REPO }}
-          token: ${{ secrets.K8S_REPO_PAT }}
+          token: ${{ env.K8S_REPO_PAT }}
           path: k8s-repo
 
       - name: Setup Kustomize
@@ -229,12 +239,15 @@ jobs:
           git push
 
       - name: Trigger ArgoCD sync (optional)
-        if: secrets.ARGOCD_AUTH_TOKEN != ''
+        if: env.ARGOCD_AUTH_TOKEN != '' && env.ARGOCD_SYNC_URL != ''
         run: |
           curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.ARGOCD_AUTH_TOKEN }}" \
+            -H "Authorization: Bearer ${{ env.ARGOCD_AUTH_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "$Determine deployment status
+            "${{ env.ARGOCD_SYNC_URL }}" \
+            -d '{}'
+
+      - name: Determine deployment status
         id: status
         run: |
           if [ "${{ needs.update-k8s-manifest.result }}" == "success" ]; then
@@ -246,7 +259,7 @@ jobs:
           fi
 
       - name: Send Slack notification
-        if: secrets.SLACK_WEBHOOK_URL != ''
+        if: env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.25.0
         with:
           payload: |
@@ -318,18 +331,18 @@ jobs:
               ]
             }
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
 
       - name: Send email notification
-        if: secrets.NOTIFICATION_EMAIL != '' && needs.update-k8s-manifest.result != 'success'
+        if: env.NOTIFICATION_EMAIL != '' && needs.update-k8s-manifest.result != 'success'
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          server_address: ${{ env.SMTP_SERVER }}
+          server_port: ${{ env.SMTP_PORT }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
           subject: "🚨 Production Deployment Failed - ${{ github.repository }}"
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          to: ${{ env.NOTIFICATION_EMAIL }}
           from: "GitHub Actions <noreply@github.com>"
           body: |
             Production deployment has failed!
@@ -342,24 +355,7 @@ jobs:
             
             Please check the workflow logs:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          priority: high\`
-              - 🔒 Digest: \`${{ needs.build-and-push.outputs.image-digest }}\`
-              - 🏷️  Tag: \`${imageTag}\`
-              - 🔗 Commit: \`${sha}\`
-              
-              **Security:**
-              - ✅ Vulnerability scanning passed
-              - ✅ Secret detection passed
-              - ✅ SBOM generated
-              - ✅ Image signed with Cosign
-              
-              **K8s Deployment:**
-              - 📂 Repository: [${{ env.K8S_REPO }}](https://github.com/${{ env.K8S_REPO }})
-              - 🎯 Environment: Production
-              - 🔄 ArgoCD will auto-sync the changes
-              
-              Monitor deployment at your ArgoCD dashboard.`
-            });
+          priority: high
 
   notify:
     name: Notify Deployment Status
@@ -386,4 +382,4 @@ jobs:
               ]
             }
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK_URL }}
