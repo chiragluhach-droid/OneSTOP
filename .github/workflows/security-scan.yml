@@ -11,6 +11,7 @@ env:
   DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
   IMAGE_NAME: ${{ secrets.DOCKER_HUB_REPOSITORY }}
   K8S_REPO: ${{ secrets.K8S_REPO_NAME }}
+  ENABLE_GHAS: ${{ vars.ENABLE_GHAS }}
 
 permissions:
   actions: read
@@ -37,6 +38,7 @@ jobs:
   codeql-analysis:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    if: env.ENABLE_GHAS == 'true'
     
     steps:
       - name: Checkout code
@@ -87,9 +89,17 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy results to GitHub Security
+        if: env.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
+
+      - name: Upload Trivy report artifact (fallback)
+        if: always() && env.ENABLE_GHAS != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
 
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@v3
