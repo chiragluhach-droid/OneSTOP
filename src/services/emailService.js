@@ -1,35 +1,32 @@
-const Brevo = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer');
 
-const apiInstance = new Brevo.TransactionalEmailsApi();
-apiInstance.setApiKey(
-  Brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY
-);
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
+});
 
-const FROM = {
-  email: process.env.BREVO_FROM_EMAIL,
-  name: process.env.BREVO_FROM_NAME,
-};
-
-const sendEmail = async ({ to, toName, cc = [], subject, htmlContent }) => {
-  const sendSmtpEmail = new Brevo.SendSmtpEmail();
-  sendSmtpEmail.subject = subject;
-  sendSmtpEmail.htmlContent = htmlContent;
-  sendSmtpEmail.sender = FROM;
-
-  // to can be a string or array of strings
+const sendEmail = async ({ to, cc = [], subject, htmlContent }) => {
   const toList = Array.isArray(to) ? to : [to];
-  sendSmtpEmail.to = toList.map((email) => ({ email, name: email }));
+
+  const mailOptions = {
+    from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_USER}>`,
+    to: toList.join(', '),
+    subject,
+    html: htmlContent,
+  };
 
   if (cc.length > 0) {
-    sendSmtpEmail.cc = cc.map((email) => ({ email, name: email }));
+    mailOptions.cc = cc.join(', ');
   }
 
   try {
-    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    const result = await transporter.sendMail(mailOptions);
     return result;
   } catch (err) {
-    console.error('Brevo email error:', err.message || err);
+    console.error('Nodemailer error:', err.message || err);
     throw err;
   }
 };
