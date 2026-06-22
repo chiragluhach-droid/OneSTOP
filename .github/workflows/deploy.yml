@@ -136,14 +136,28 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+      - name: Show Trivy SARIF path and size
+        if: always()
+        run: |
+          if [ -f trivy-image-results.sarif ]; then
+            echo "Generated SARIF report: trivy-image-results.sarif"
+            ls -lh trivy-image-results.sarif
+          else
+            echo "SARIF report was not generated."
+          fi
+
+      - name: Show Trivy SARIF content
+        if: always() && hashFiles('trivy-image-results.sarif') != ''
+        run: cat trivy-image-results.sarif
+
       - name: Upload Trivy image scan results
         if: always() && env.ENABLE_GHAS == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-image-results.sarif'
 
-      - name: Upload Trivy image report artifact (fallback)
-        if: always() && env.ENABLE_GHAS != 'true'
+      - name: Upload Trivy image report artifact
+        if: always() && hashFiles('trivy-image-results.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image-results
