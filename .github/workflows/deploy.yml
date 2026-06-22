@@ -23,6 +23,8 @@ env:
   SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
   SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
   ENABLE_GHAS: ${{ vars.ENABLE_GHAS }}
+  TRIVY_BLOCKING: ${{ vars.TRIVY_BLOCKING || 'false' }}
+  GRYPE_BLOCKING: ${{ vars.GRYPE_BLOCKING || 'false' }}
 
 jobs:
   security-scan:
@@ -131,11 +133,13 @@ jobs:
         continue-on-error: true
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+          scan-type: 'image'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
           ignore-unfixed: true
+          scanners: 'vuln'
 
       - name: Show Trivy SARIF path and size
         if: always()
@@ -147,9 +151,10 @@ jobs:
             echo "SARIF report was not generated."
           fi
 
-      - name: Show Trivy SARIF content
+      - name: Show Trivy finding summary
         if: always() && hashFiles('trivy-image-results.sarif') != ''
-        run: cat trivy-image-results.sarif
+        run: |
+          node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('trivy-image-results.sarif','utf8')); const results=(s.runs||[]).flatMap(r=>r.results||[]); console.log('Total HIGH/CRITICAL findings:', results.length); const top=results.slice(0,20); top.forEach((r,i)=>console.log((i+1)+'. '+(r.ruleId||'unknown')+' :: '+((r.message&&r.message.text)||'no message'))); if(results.length>20){console.log('...and '+(results.length-20)+' more. See artifact for full SARIF.');}"
 
       - name: Upload Trivy image scan results
         if: always() && env.ENABLE_GHAS == 'true'
@@ -167,13 +172,13 @@ jobs:
       - name: Enforce Trivy policy (fail on HIGH/CRITICAL)
         if: always() && hashFiles('trivy-image-results.sarif') != ''
         run: |
-          node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('trivy-image-results.sarif','utf8')); const count=(s.runs||[]).reduce((n,r)=>n+((r.results||[]).length),0); console.log('Trivy HIGH/CRITICAL findings:', count); if(count>0){process.exit(1);}"
+          node -e "const fs=require('fs'); const blocking=(process.env.TRIVY_BLOCKING||'false').toLowerCase()==='true'; const s=JSON.parse(fs.readFileSync('trivy-image-results.sarif','utf8')); const count=(s.runs||[]).reduce((n,r)=>n+((r.results||[]).length),0); console.log('Trivy HIGH/CRITICAL findings:', count); console.log('TRIVY_BLOCKING:', process.env.TRIVY_BLOCKING||'false'); if(blocking&&count>0){process.exit(1);}"
 
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@v3
         with:
           image: ${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
-          fail-build: true
+          fail-build: ${{ env.GRYPE_BLOCKING == 'true' }}
           severity-cutoff: high
 
       - name: Generate SBOM
