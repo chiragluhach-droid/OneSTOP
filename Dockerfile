@@ -26,8 +26,10 @@ COPY . .
 # Production stage
 FROM node:20-alpine AS production
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Upgrade base OS packages first so security fixes (e.g., OpenSSL) are included,
+# then install runtime init helper.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache dumb-init
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
