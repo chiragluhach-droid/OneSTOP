@@ -25,6 +25,7 @@ env:
   ENABLE_GHAS: ${{ vars.ENABLE_GHAS }}
   TRIVY_BLOCKING: ${{ vars.TRIVY_BLOCKING || 'false' }}
   GRYPE_BLOCKING: ${{ vars.GRYPE_BLOCKING || 'false' }}
+  K8S_REPO_REF: ${{ vars.K8S_REPO_REF || 'main' }}
 
 jobs:
   security-scan:
@@ -212,11 +213,23 @@ jobs:
       contents: write
     
     steps:
+      - name: Validate K8s repo configuration
+        run: |
+          if [ -z "${{ env.K8S_REPO }}" ]; then
+            echo "::error::K8S_REPO_NAME secret is missing. Set it as owner/repo for the manifests repository."
+            exit 1
+          fi
+          if [ -z "${{ env.K8S_REPO_PAT }}" ]; then
+            echo "::error::K8S_REPO_PAT secret is missing. Use a PAT with access to the target repo."
+            exit 1
+          fi
+
       - name: Checkout K8s repository
         uses: actions/checkout@v4
         with:
           repository: ${{ env.K8S_REPO }}
           token: ${{ env.K8S_REPO_PAT }}
+          ref: ${{ env.K8S_REPO_REF }}
           path: k8s-repo
 
       - name: Setup Kustomize
