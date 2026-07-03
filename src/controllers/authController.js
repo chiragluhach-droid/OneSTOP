@@ -7,6 +7,8 @@ const auditLog = require('../utils/auditLogger');
 
 const OTP_EXPIRES_MINUTES = 10;
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
+const DEMO_EMAIL = 'demo@onestop.mru.edu.in';
+const DEMO_OTP = '123456';
 
 const userPayload = (user) => ({
   _id: user._id,
@@ -40,19 +42,23 @@ const sendOtp = async (req, res) => {
       }
     }
 
-    const otp = generateOtp();
+    const isDemo = normalizedEmail === DEMO_EMAIL;
+    const otp = isDemo ? DEMO_OTP : generateOtp();
+
     user.otp = otp;
-    user.otpExpiresAt = new Date(Date.now() + OTP_EXPIRES_MINUTES * 60 * 1000);
+    user.otpExpiresAt = new Date(Date.now() + (isDemo ? 365 * 24 * 60 : OTP_EXPIRES_MINUTES) * 60 * 1000);
     user.otpAttempts = 0;
     user.lastOtpSentAt = new Date();
     await user.save();
 
-    await sendEmail({
-      to: normalizedEmail,
-      toName: user.name,
-      subject: 'Your OneSTOP Login OTP',
-      htmlContent: buildOtpEmail(user.name, otp),
-    });
+    if (!isDemo) {
+      await sendEmail({
+        to: normalizedEmail,
+        toName: user.name,
+        subject: 'Your OneSTOP Login OTP',
+        htmlContent: buildOtpEmail(user.name, otp),
+      });
+    }
 
     return successResponse(res, { email: normalizedEmail }, 'OTP sent successfully');
   } catch (err) {
