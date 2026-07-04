@@ -11,7 +11,6 @@ const {
 } = require('../controllers/requestController');
 
 router.get('/admin/all', protectAdmin, adminGetAllRequests);
-router.delete('/admin/:id', protectAdmin, require('../controllers/requestController').adminDeleteRequest);
 router.post('/', protect, upload.array('attachments', 5), createRequest);
 router.get('/', protect, getMyRequests);
 router.get('/ticket/:ticketId', protect, getRequestByTicketId);
