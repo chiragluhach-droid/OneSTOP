@@ -217,10 +217,28 @@ const adminGetAllRequests = async (req, res) => {
   }
 };
 
+const adminDeleteRequest = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id);
+    if (!request) return errorResponse(res, 'Request not found', 404);
+    const rid = request._id;
+    await Promise.all([
+      WorkflowStage.deleteMany({ request: rid }),
+      require('../models/ApprovalToken').deleteMany({ request: rid }),
+      Notification.deleteMany({ request: rid }),
+      Request.findByIdAndDelete(rid),
+    ]);
+    return successResponse(res, {}, 'Request deleted');
+  } catch (err) {
+    return errorResponse(res, 'Failed to delete request', 500);
+  }
+};
+
 module.exports = {
   createRequest,
   getMyRequests,
   getRequestById,
   getRequestByTicketId,
   adminGetAllRequests,
+  adminDeleteRequest,
 };
