@@ -81,15 +81,18 @@ const createRequest = async (req, res) => {
 
     const canForward = totalStages > 1; // stage 0 can forward to stage 1 if multiple owners
 
-    await sendApprovalEmail({
-      request,
-      workflowStage: stages[0],
-      stageIndex: 0,
-      canForward,
-      student: req.user,
-      category,
-      school,
-    });
+    const isDemo = req.user.email === 'demo@onestop.mru.edu.in';
+    if (!isDemo) {
+      await sendApprovalEmail({
+        request,
+        workflowStage: stages[0],
+        stageIndex: 0,
+        canForward,
+        student: req.user,
+        category,
+        school,
+      });
+    }
 
     await Request.findByIdAndUpdate(request._id, { status: 'in_review' });
 
@@ -223,5 +226,4 @@ module.exports = {
   getRequestById,
   getRequestByTicketId,
   adminGetAllRequests,
-  adminDeleteRequest,
 };
