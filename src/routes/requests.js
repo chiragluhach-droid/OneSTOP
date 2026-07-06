@@ -8,9 +8,11 @@ const {
   getRequestById,
   getRequestByTicketId,
   adminGetAllRequests,
+  adminDeleteDemoRequests,
 } = require('../controllers/requestController');
 
 router.get('/admin/all', protectAdmin, adminGetAllRequests);
+router.delete('/admin/demo-cleanup', protectAdmin, adminDeleteDemoRequests);
 router.post('/', protect, upload.array('attachments', 5), createRequest);
 router.get('/', protect, getMyRequests);
 router.get('/ticket/:ticketId', protect, getRequestByTicketId);

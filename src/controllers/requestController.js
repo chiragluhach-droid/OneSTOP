@@ -220,10 +220,42 @@ const adminGetAllRequests = async (req, res) => {
   }
 };
 
+const adminDeleteDemoRequests = async (req, res) => {
+  try {
+    const DEMO_EMAIL = 'demo@onestop.mru.edu.in';
+    const User = require('../models/User');
+    const WorkflowStage = require('../models/WorkflowStage');
+    const ApprovalToken = require('../models/ApprovalToken');
+    const Notification = require('../models/Notification');
+    const AuditLog = require('../models/AuditLog');
+
+    const demo = await User.findOne({ email: DEMO_EMAIL });
+    if (!demo) return errorResponse(res, 'Demo user not found', 404);
+
+    const requests = await Request.find({ student: demo._id });
+    const requestIds = requests.map(r => r._id);
+
+    if (requestIds.length > 0) {
+      await Promise.all([
+        WorkflowStage.deleteMany({ request: { $in: requestIds } }),
+        ApprovalToken.deleteMany({ request: { $in: requestIds } }),
+        Notification.deleteMany({ request: { $in: requestIds } }),
+        AuditLog.deleteMany({ request: { $in: requestIds } }),
+        Request.deleteMany({ student: demo._id }),
+      ]);
+    }
+
+    return successResponse(res, { deleted: requestIds.length });
+  } catch (err) {
+    return errorResponse(res, 'Failed to delete demo requests', 500);
+  }
+};
+
 module.exports = {
   createRequest,
   getMyRequests,
   getRequestById,
   getRequestByTicketId,
   adminGetAllRequests,
+  adminDeleteDemoRequests,
 };
