@@ -6,7 +6,7 @@ const getFeatures = async (req, res) => {
   try {
     const doc = await Setting.findOne({ key: 'features' });
     const features = doc?.value ?? { studentServicesEnabled: false };
-    return successResponse(res, 'Features fetched', { features });
+    return successResponse(res, { features }, 'Features fetched');
   } catch (err) {
     return errorResponse(res, 'Failed to fetch features', 500);
   }
@@ -26,7 +26,7 @@ const updateFeatures = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    return successResponse(res, 'Features updated', { features: doc.value });
+    return successResponse(res, { features: doc.value }, 'Features updated');
   } catch (err) {
     return errorResponse(res, 'Failed to update features', 500);
   }
