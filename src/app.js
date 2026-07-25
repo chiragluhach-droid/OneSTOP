@@ -14,6 +14,7 @@ const requestRoutes = require('./routes/requests');
 const approvalRoutes = require('./routes/approvals');
 const notificationRoutes = require('./routes/notifications');
 const adminStudentRoutes = require('./routes/adminStudents');
+const settingRoutes = require('./routes/settings');
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/students', adminStudentRoutes);
+app.use('/api/settings', settingRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
