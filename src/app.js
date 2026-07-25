@@ -18,6 +18,14 @@ const settingRoutes = require('./routes/settings');
 
 const app = express();
 
+// In Kubernetes the app sits behind an ingress that sets X-Forwarded-For.
+// express-rate-limit v7 validates this and throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR when Express doesn't trust the proxy,
+// which surfaces as an unhandled rejection and kills the process on boot.
+// '1' = trust exactly one proxy hop; don't use `true`, which lets a client
+// spoof X-Forwarded-For and bypass rate limiting entirely.
+app.set('trust proxy', 1);
+
 connectDB();
 
 app.use(helmet({ contentSecurityPolicy: false }));
