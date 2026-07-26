@@ -31,7 +31,11 @@ const sendOtp = async (req, res) => {
       return errorResponse(res, 'You are not registered in the system. Please contact admin.', 404);
     }
 
-    if (user.lastOtpSentAt) {
+    const isDemo = normalizedEmail === DEMO_EMAIL;
+
+    // The demo account skips the resend cooldown: nothing is emailed for it, and
+    // a reviewer logging out and straight back in would otherwise be blocked.
+    if (user.lastOtpSentAt && !isDemo) {
       const secondsSinceLast = (Date.now() - new Date(user.lastOtpSentAt).getTime()) / 1000;
       if (secondsSinceLast < OTP_RESEND_COOLDOWN_SECONDS) {
         return errorResponse(
@@ -42,7 +46,6 @@ const sendOtp = async (req, res) => {
       }
     }
 
-    const isDemo = normalizedEmail === DEMO_EMAIL;
     const otp = isDemo ? DEMO_OTP : generateOtp();
 
     user.otp = otp;

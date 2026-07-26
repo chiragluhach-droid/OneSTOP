@@ -39,10 +39,19 @@ const globalLimiter = rateLimit({
   message: { success: false, message: 'Too many requests, please try again later.' },
 });
 
+// Key OTP throttling by email rather than IP. Students share public IPs behind
+// campus WiFi and carrier NAT, so an IP-keyed bucket lets the first 10 logins in
+// a window lock out everyone else on the same network. Per-account abuse is
+// still covered by OTP_RESEND_COOLDOWN_SECONDS in sendOtp, and globalLimiter
+// above remains the per-IP backstop for floods of unknown addresses.
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { success: false, message: 'Too many OTP requests.' },
+  keyGenerator: (req) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
+    return email || req.ip;
+  },
 });
 
 app.use('/api', globalLimiter);
