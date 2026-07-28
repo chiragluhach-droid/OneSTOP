@@ -5,7 +5,10 @@ const { successResponse, errorResponse } = require('../utils/apiResponse');
 const getFeatures = async (req, res) => {
   try {
     const doc = await Setting.findOne({ key: 'features' });
-    const features = doc?.value ?? { studentServicesEnabled: false };
+    // Fail open. Student services are live, so a missing settings document must
+    // not read as "disabled" — the mobile app would show "Coming Soon" to every
+    // user. Turning the feature off is an explicit admin action via PATCH.
+    const features = doc?.value ?? { studentServicesEnabled: true };
     return successResponse(res, { features }, 'Features fetched');
   } catch (err) {
     return errorResponse(res, 'Failed to fetch features', 500);

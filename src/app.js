@@ -37,6 +37,14 @@ const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   message: { success: false, message: 'Too many requests, please try again later.' },
+  // The public feature-flag read is exempt. It is keyed by IP like everything
+  // else here, so on campus WiFi or carrier NAT a whole cohort shares one
+  // 200-request budget; once it runs out this endpoint 429s, and the shipped
+  // mobile app treats any failed read as "feature disabled" and shows its
+  // "Coming Soon" dialog. Those builds cannot be patched, so the endpoint has
+  // to stay reachable. It is an unauthenticated single indexed findOne with no
+  // side effects, so it is not worth rationing.
+  skip: (req) => req.method === 'GET' && req.originalUrl.startsWith('/api/settings/features'),
 });
 
 // Key OTP throttling by email rather than IP. Students share public IPs behind
