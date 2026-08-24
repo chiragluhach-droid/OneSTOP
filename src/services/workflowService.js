@@ -57,7 +57,7 @@ const sendApprovalEmail = async ({ request, workflowStage, stageIndex, canForwar
 
   await sendEmail({
     to: workflowStage.recipientEmails,
-    subject: `[OneSTOP] Action Required — Ticket #${request.ticketId}`,
+    subject: `[MR One] Action Required — Ticket #${request.ticketId}`,
     htmlContent: actionHtml,
   });
 
@@ -79,7 +79,7 @@ const sendApprovalEmail = async ({ request, workflowStage, stageIndex, canForwar
 
     await sendEmail({
       to: workflowStage.ccEmails,
-      subject: `[OneSTOP] FYI — New Request Ticket #${request.ticketId}`,
+      subject: `[MR One] FYI — New Request Ticket #${request.ticketId}`,
       htmlContent: ccHtml,
     });
   }

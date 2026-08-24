@@ -26,7 +26,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.1);">
         <tr>
           <td style="background:#8B1A1A;padding:24px 32px;">
-            <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">OneSTOP</h1>
+            <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">MR One</h1>
             <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University — Request Update</p>
           </td>
         </tr>
@@ -48,13 +48,13 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
         ${remarksSection}
         <tr>
           <td style="padding:20px 32px 32px;">
-            <p style="margin:0;font-size:13px;color:#888;">Open the OneSTOP app to view the full timeline of your request.</p>
+            <p style="margin:0;font-size:13px;color:#888;">Open the MR One app to view the full timeline of your request.</p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
-              OneSTOP — Manav Rachna University | Automated Workflow Platform
+              MR One — Manav Rachna University | Automated Workflow Platform
             </p>
           </td>
         </tr>

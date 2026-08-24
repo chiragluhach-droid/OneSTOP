@@ -99,7 +99,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`OneSTOP backend running on port ${PORT}`);
+  console.log(`MR One backend running on port ${PORT}`);
 });
 
 module.exports = app;

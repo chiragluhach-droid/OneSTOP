@@ -146,7 +146,7 @@ const handleApprovalAction = async (req, res) => {
     await sendEmail({
       to: student.email,
       toName: student.name,
-      subject: `[OneSTOP] Your request #${request.ticketId} — ${notifTitle}`,
+      subject: `[MR One] Your request #${request.ticketId} — ${notifTitle}`,
       htmlContent: buildStudentNotificationEmail({
         studentName: student.name,
         ticketId: request.ticketId,
@@ -196,12 +196,12 @@ const buildResultPage = (type, message, ticketId, action) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>OneSTOP — Action Result</title>
+  <title>MR One — Action Result</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;">
   <div style="max-width:480px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
     <div style="background:#8B1A1A;padding:24px 32px;">
-      <h1 style="margin:0;color:#fff;font-size:20px;">OneSTOP</h1>
+      <h1 style="margin:0;color:#fff;font-size:20px;">MR One</h1>
       <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University</p>
     </div>
     <div style="padding:40px 32px;text-align:center;">

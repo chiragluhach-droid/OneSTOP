@@ -58,7 +58,7 @@ const sendOtp = async (req, res) => {
       await sendEmail({
         to: normalizedEmail,
         toName: user.name,
-        subject: 'Your OneSTOP Login OTP',
+        subject: 'Your MR One Login OTP',
         htmlContent: buildOtpEmail(user.name, otp),
       });
     }
@@ -183,19 +183,19 @@ const buildOtpEmail = (name, otp) => `
     <tr><td align="center">
       <table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.1);">
         <tr><td style="background:#8B1A1A;padding:24px 32px;">
-          <h1 style="margin:0;color:#fff;font-size:22px;">OneSTOP</h1>
+          <h1 style="margin:0;color:#fff;font-size:22px;">MR One</h1>
           <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University</p>
         </td></tr>
         <tr><td style="padding:32px;">
           <p style="margin:0;font-size:16px;color:#222;">Hi ${name || 'Student'},</p>
-          <p style="margin:12px 0;font-size:14px;color:#555;">Your OneSTOP login OTP is:</p>
+          <p style="margin:12px 0;font-size:14px;color:#555;">Your MR One login OTP is:</p>
           <div style="text-align:center;padding:24px;background:#fdf5f5;border-radius:8px;margin:20px 0;">
             <span style="font-size:42px;font-weight:700;color:#8B1A1A;letter-spacing:8px;">${otp}</span>
           </div>
           <p style="font-size:13px;color:#888;">This OTP expires in <strong>10 minutes</strong>. Do not share it with anyone.</p>
         </td></tr>
         <tr><td style="background:#f8f8f8;padding:16px 32px;border-top:1px solid #eee;">
-          <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">OneSTOP — Manav Rachna University</p>
+          <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">MR One — Manav Rachna University</p>
         </td></tr>
       </table>
     </td></tr>
