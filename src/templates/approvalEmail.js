@@ -42,7 +42,7 @@ const buildApprovalEmail = ({
   const actionButtons = `
     <a href="${resolvedUrl}"
        style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
-      ✓ Resolved
+      ✓ Resolve
     </a>
     ${canForward && forwardUrl ? `
     <a href="${forwardUrl}"
