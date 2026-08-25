@@ -2,7 +2,7 @@ const buildApprovalEmail = ({
   stageName,
   studentName,
   studentEmail,
-  studentCollegeId,
+  studentRollNumber,
   ticketId,
   category,
   school,
@@ -10,9 +10,9 @@ const buildApprovalEmail = ({
   description,
   attachments,
   resolvedUrl,
-  rejectUrl,
   forwardUrl,
   canForward,
+  handoverNote,
 }) => {
   const attachmentLinks =
     attachments && attachments.length > 0
@@ -21,11 +21,25 @@ const buildApprovalEmail = ({
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
 
+  // A handover note written by the previous stage, shown before the details so
+  // it is read before any action is taken.
+  const handoverBlock = handoverNote
+    ? `
+        <tr>
+          <td style="padding:20px 32px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#eef2ff;border-left:4px solid #1E3A8A;border-radius:6px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0 0 6px;font-size:11px;color:#1E3A8A;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Note from the previous process owner</p>
+                  <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">${handoverNote}</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>`
+    : '';
+
   const actionButtons = `
-    <a href="${rejectUrl}"
-       style="display:inline-block;padding:13px 26px;background:#c0392b;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
-      ✗ Reject
-    </a>
     <a href="${resolvedUrl}"
        style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
       ✓ Resolved
@@ -47,7 +61,7 @@ const buildApprovalEmail = ({
         <tr>
           <td style="background:#8B1A1A;padding:24px 32px;">
             <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">MR One</h1>
-            <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University — Workflow Platform</p>
+            <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University</p>
           </td>
         </tr>
         <tr>
@@ -55,6 +69,7 @@ const buildApprovalEmail = ({
             <span style="background:#e67e22;color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;">Action Required</span>
           </td>
         </tr>
+        ${handoverBlock}
         <tr>
           <td style="padding:20px 32px 0;">
             <p style="margin:0;font-size:16px;color:#222;">Dear <strong>Process Owner</strong>,</p>
@@ -84,8 +99,8 @@ const buildApprovalEmail = ({
                 <td style="color:#222;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${studentName}</td>
               </tr>
               <tr>
-                <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">College ID</td>
-                <td style="color:#222;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${studentCollegeId}</td>
+                <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Roll Number</td>
+                <td style="color:#222;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${studentRollNumber}</td>
               </tr>
               <tr style="background:#fafafa;">
                 <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Email</td>
@@ -126,14 +141,14 @@ const buildApprovalEmail = ({
             <div style="flex-wrap:wrap;">${actionButtons}</div>
             <p style="margin:20px 0 0;font-size:12px;color:#aaa;">
               These links expire in 72 hours and can only be used once.
-              ${canForward ? '<br><strong>Forward</strong> sends to the next process owner. <strong>Resolved</strong> closes the request.' : ''}
+              ${canForward ? '<br><strong>Forward</strong> passes it to the next process owner — you can add a note for them. <strong>Resolved</strong> closes the request with your message to the student.' : '<br><strong>Resolved</strong> closes the request with your message to the student.'}
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
-              MR One — Manav Rachna University | Automated Workflow Platform<br>
+              MR One — Manav Rachna University<br>
               Do not reply to this email directly.
             </p>
           </td>

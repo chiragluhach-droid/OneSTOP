@@ -1,14 +1,7 @@
-// One read-only template for every FYI copy a CC recipient gets — the initial
-// routing notice and each subsequent action on the ticket. `event` is null for
-// the first copy and describes what happened for the rest.
-const EVENT_STYLES = {
-  forwarded: { badge: 'Forwarded',  color: '#1E3A8A', tint: '#eef2ff', verb: 'forwarded this request' },
-  resolved:  { badge: 'Resolved',   color: '#1a7a3a', tint: '#e8f6ec', verb: 'marked this request resolved' },
-  rejected:  { badge: 'Rejected',   color: '#c0392b', tint: '#fdeceb', verb: 'rejected this request' },
-  escalated: { badge: 'Escalated',  color: '#b45309', tint: '#fef3c7', verb: 'was escalated — no action was taken in time' },
-};
-
-const buildCCInfoEmail = ({
+// Sent to the category's escalation contacts when a stage has gone unactioned
+// past its window. Deliberately carries no action buttons — the original
+// process owner's links are still the only way to act on the ticket.
+const buildEscalationEmail = ({
   stageName,
   studentName,
   studentEmail,
@@ -19,12 +12,10 @@ const buildCCInfoEmail = ({
   subject,
   description,
   attachments,
-  processOwnerEmail,
-  event = null,
+  hours,
+  pendingWith,
+  sentAt,
 }) => {
-  const style = event ? EVENT_STYLES[event.type] : null;
-  const accent = style ? style.color : '#475569';
-
   const attachmentLinks =
     attachments && attachments.length > 0
       ? attachments.map((a) =>
@@ -32,37 +23,9 @@ const buildCCInfoEmail = ({
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
 
-  const headline = style
-    ? `
-        <tr>
-          <td style="padding:20px 32px 0;">
-            <p style="margin:0;font-size:15px;color:#222;">
-              <strong>${event.actorEmail || 'A process owner'}</strong> ${style.verb}.
-            </p>
-            ${event.nextOwnerEmail ? `
-            <p style="margin:10px 0 0;font-size:14px;color:#555;">
-              It is now with <strong>${event.nextOwnerEmail}</strong> for action.
-            </p>` : ''}
-            <p style="margin:10px 0 0;font-size:14px;color:#555;">
-              This is an informational copy — no action is required from you.
-            </p>
-            ${event.remarks ? `
-            <div style="margin:16px 0 0;background:${style.tint};border-left:4px solid ${accent};border-radius:6px;padding:14px 16px;">
-              <p style="margin:0 0 6px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;">Remarks</p>
-              <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">${event.remarks}</p>
-            </div>` : ''}
-          </td>
-        </tr>`
-    : `
-        <tr>
-          <td style="padding:20px 32px 0;">
-            <p style="margin:0;font-size:15px;color:#222;">This is an <strong>informational copy</strong> of a student request.</p>
-            <p style="margin:10px 0 0;font-size:14px;color:#555;">
-              The request has been routed to <strong>${processOwnerEmail}</strong> for action.
-              No action is required from you on this email.
-            </p>
-          </td>
-        </tr>`;
+  const sentLabel = sentAt
+    ? new Date(sentAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+    : '—';
 
   return `
 <!DOCTYPE html>
@@ -80,19 +43,29 @@ const buildCCInfoEmail = ({
         </tr>
         <tr>
           <td style="padding:16px 32px 0;">
-            <span style="background:${accent};color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;">
-              ${style ? style.badge + ' · FYI' : 'For Your Information (CC)'}
+            <span style="background:#b45309;color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;">
+              Escalation · Overdue
             </span>
           </td>
         </tr>
-        ${headline}
+        <tr>
+          <td style="padding:20px 32px 0;">
+            <p style="margin:0;font-size:15px;color:#222;">
+              A student request has been waiting <strong>more than ${hours} hours</strong> without any action.
+            </p>
+            <p style="margin:10px 0 0;font-size:14px;color:#555;">
+              It is still pending with <strong>${pendingWith || '—'}</strong>, who was emailed on ${sentLabel}.
+              You are receiving this as the escalation contact for this category.
+            </p>
+          </td>
+        </tr>
         <tr>
           <td style="padding:20px 32px;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-left:4px solid ${accent};border-radius:6px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border-left:4px solid #b45309;border-radius:6px;">
               <tr>
                 <td style="padding:16px 20px;">
                   <p style="margin:0 0 4px;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px;">Ticket ID</p>
-                  <p style="margin:0;font-size:22px;font-weight:700;color:${accent};">#${ticketId}</p>
+                  <p style="margin:0;font-size:22px;font-weight:700;color:#b45309;">#${ticketId}</p>
                   <p style="margin:4px 0 0;font-size:12px;color:#888;">${stageName}</p>
                 </td>
               </tr>
@@ -147,7 +120,7 @@ const buildCCInfoEmail = ({
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
               MR One — Manav Rachna University<br>
-              This is an automated informational copy. No action needed.
+              The action links remain with the assigned process owner.
             </p>
           </td>
         </tr>
@@ -158,4 +131,4 @@ const buildCCInfoEmail = ({
 </html>`;
 };
 
-module.exports = { buildCCInfoEmail };
+module.exports = { buildEscalationEmail };

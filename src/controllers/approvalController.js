@@ -7,11 +7,186 @@ const School = require('../models/School');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { sendEmail } = require('../services/emailService');
-const { sendApprovalEmail } = require('../services/workflowService');
+const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowService');
 const { buildStudentNotificationEmail } = require('../templates/studentNotificationEmail');
 const auditLog = require('../utils/auditLogger');
 
-const VALID_ACTIONS = ['forward', 'resolved', 'reject'];
+// Reject was removed — a process owner closes a request with Resolve and
+// explains why in their message to the student.
+const VALID_ACTIONS = ['forward', 'resolved'];
+
+const esc = (v) =>
+  String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const ACTION_META = {
+  resolved: {
+    title: 'Resolve Request',
+    button: '✓ Confirm Resolve',
+    color: '#1a7a3a',
+    badge: 'Resolving',
+    intro: 'This closes the request and notifies the student with your message.',
+    remarksLabel: 'Message to student',
+    remarksHint: 'Explain how it was resolved — or, if it cannot be done, why. The student sees this.',
+    remarksRequired: true,
+  },
+  forward: {
+    title: 'Forward Request',
+    button: '→ Confirm Forward',
+    color: '#1E3A8A',
+    badge: 'Forwarding',
+    intro: 'This sends the request to the next process owner. The student is notified.',
+    remarksLabel: 'Note to student',
+    remarksHint: 'Optional — tell the student why it is being forwarded.',
+    remarksRequired: false,
+    handoverLabel: 'Note to the next process owner',
+    handoverHint: 'Optional — what you already did, and what they need to do. Only they see this.',
+  },
+};
+
+const buildFormPage = ({ act, token, ticketId, subject, description, studentName, categoryName, stageName, errorMessage, previousRemarks, previousHandover, nextOwnerEmail }) => {
+  const meta = ACTION_META[act];
+  const required = meta.remarksRequired ? '<span style="color:#c0392b;"> *</span>' : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MR One — ${esc(meta.title)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{max-width:540px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.12)}
+    .hdr{background:#8B1A1A;padding:24px 28px}
+    .hdr h1{color:#fff;font-size:20px;font-weight:700}
+    .hdr p{color:#f5c6c6;font-size:13px;margin-top:4px}
+    .badge-row{padding:20px 28px 0}
+    .badge{display:inline-block;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:600;color:#fff;background:${meta.color}}
+    .intro{padding:12px 28px 0;font-size:14px;color:#666;line-height:1.5}
+    .details{margin:16px 28px;background:#f8f9fa;border-radius:10px;padding:16px}
+    .d-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee}
+    .d-row:last-child{border-bottom:none}
+    .d-label{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px}
+    .d-value{font-size:13px;color:#333;font-weight:600;text-align:right;max-width:60%}
+    .desc-box{margin:0 28px 16px}
+    .desc-lbl{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+    .desc-txt{font-size:13px;color:#444;line-height:1.6;background:#f8f9fa;padding:12px;border-radius:8px;max-height:120px;overflow-y:auto}
+    .form-section{padding:0 28px 24px}
+    .f-label{font-size:14px;font-weight:600;color:#333;margin-bottom:8px}
+    .f-hint{font-size:12px;color:#999;margin-bottom:8px}
+    textarea{width:100%;min-height:110px;padding:14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;transition:border-color .2s;color:#333;background:#fafafa}
+    textarea:focus{outline:none;border-color:${meta.color};background:#fff}
+    .handover{margin-top:22px;padding-top:20px;border-top:1px dashed #dcdcdc}
+    .err-msg{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#dc2626}
+    .submit-btn{display:block;width:100%;padding:16px;background:${meta.color};color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .2s;font-family:inherit;margin-top:16px;letter-spacing:.3px}
+    .submit-btn:hover{opacity:.9}
+    .submit-btn:disabled{opacity:.5;cursor:not-allowed}
+    .ftr{background:#f8f8f8;padding:16px 28px;border-top:1px solid #eee;text-align:center}
+    .ftr p{font-size:12px;color:#aaa}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="hdr">
+      <h1>MR One</h1>
+      <p>Manav Rachna University</p>
+    </div>
+    <div class="badge-row"><span class="badge">${esc(meta.badge)}</span></div>
+    <p class="intro">${esc(meta.intro)}</p>
+    <div class="details">
+      <div class="d-row"><span class="d-label">Ticket</span><span class="d-value">#${esc(ticketId)}</span></div>
+      <div class="d-row"><span class="d-label">Student</span><span class="d-value">${esc(studentName || '—')}</span></div>
+      <div class="d-row"><span class="d-label">Category</span><span class="d-value">${esc(categoryName || '—')}</span></div>
+      <div class="d-row"><span class="d-label">Stage</span><span class="d-value">${esc(stageName || '—')}</span></div>
+    </div>
+    <div class="desc-box">
+      <div class="desc-lbl">Subject</div>
+      <div class="desc-txt" style="margin-bottom:10px;"><strong>${esc(subject)}</strong></div>
+      <div class="desc-lbl">Description</div>
+      <div class="desc-txt">${esc(description)}</div>
+    </div>
+    <form method="POST" action="?act=${act}" class="form-section" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Submitting…';">
+      ${errorMessage ? `<div class="err-msg">${esc(errorMessage)}</div>` : ''}
+      <div class="f-label">${esc(meta.remarksLabel)}${required}</div>
+      <div class="f-hint">${esc(meta.remarksHint)}</div>
+      <textarea name="remarks" placeholder="Type your message here...">${esc(previousRemarks || '')}</textarea>
+      ${meta.handoverLabel ? `
+      <div class="handover">
+        <div class="f-label">${esc(meta.handoverLabel)}</div>
+        <div class="f-hint">${esc(meta.handoverHint)}${nextOwnerEmail ? ` Goes to <strong>${esc(nextOwnerEmail)}</strong>.` : ''}</div>
+        <textarea name="handoverNote" placeholder="e.g. I have verified the documents — please approve the fee waiver.">${esc(previousHandover || '')}</textarea>
+      </div>` : ''}
+      <input type="hidden" name="act" value="${act}">
+      <button type="submit" class="submit-btn">${esc(meta.button)}</button>
+    </form>
+    <div class="ftr"><p>You can close this tab after submitting.</p></div>
+  </div>
+</body>
+</html>`;
+};
+
+const showApprovalForm = async (req, res) => {
+  const { token } = req.params;
+  const act = req.query.act;
+
+  if (!VALID_ACTIONS.includes(act)) {
+    return res.status(400).send(buildResultPage('error', 'Invalid action.'));
+  }
+
+  try {
+    const approvalToken = await ApprovalToken.findOne({ token })
+      .populate('request')
+      .populate('workflowStage');
+
+    if (!approvalToken) {
+      return res.status(404).send(buildResultPage('error', 'This link is invalid or does not exist.'));
+    }
+    if (approvalToken.isUsed) {
+      return res.status(400).send(buildResultPage('error', 'This action link has already been used.'));
+    }
+    if (new Date() > approvalToken.expiresAt) {
+      return res.status(400).send(buildResultPage('error', 'This link has expired. Please contact the student to resend.'));
+    }
+
+    const { request, workflowStage } = approvalToken;
+
+    if (['resolved', 'rejected'].includes(request.status)) {
+      return res.status(400).send(buildResultPage('error', 'This request has already been closed.'));
+    }
+
+    const [student, category] = await Promise.all([
+      User.findById(request.student),
+      Category.findById(request.category),
+    ]);
+
+    // Naming the recipient makes the handover note concrete rather than abstract.
+    const nextStage = act === 'forward'
+      ? await WorkflowStage.findOne({ request: request._id, stageIndex: approvalToken.stageIndex + 1 })
+      : null;
+
+    return res.status(200).send(
+      buildFormPage({
+        act,
+        token,
+        ticketId: request.ticketId,
+        subject: request.subject,
+        description: request.description,
+        studentName: student?.name,
+        categoryName: category?.name,
+        stageName: workflowStage.stageName,
+        nextOwnerEmail: (nextStage?.recipientEmails || [])[0] || null,
+      })
+    );
+  } catch (err) {
+    console.error('showApprovalForm error:', err);
+    return res.status(500).send(buildResultPage('error', 'An internal error occurred. Please try again.'));
+  }
+};
 
 const handleApprovalAction = async (req, res) => {
   const { token } = req.params;
@@ -44,23 +219,53 @@ const handleApprovalAction = async (req, res) => {
       return res.status(400).send(buildResultPage('error', 'This request has already been closed.'));
     }
 
+    const remarks = typeof req.body.remarks === 'string' ? req.body.remarks.trim() : '';
+    const handoverNote = typeof req.body.handoverNote === 'string' ? req.body.handoverNote.trim() : '';
+
+    // If remarks are required but missing, re-render the form WITHOUT consuming the token
+    if (ACTION_META[act].remarksRequired && !remarks) {
+      const [student, category] = await Promise.all([
+        User.findById(request.student),
+        Category.findById(request.category),
+      ]);
+      return res.status(400).send(
+        buildFormPage({
+          act,
+          token,
+          ticketId: request.ticketId,
+          subject: request.subject,
+          description: request.description,
+          studentName: student?.name,
+          categoryName: category?.name,
+          stageName: workflowStage.stageName,
+          errorMessage: `${ACTION_META[act].remarksLabel} is required.`,
+          previousRemarks: remarks,
+          previousHandover: handoverNote,
+          nextOwnerEmail: act === 'forward'
+            ? (
+                (await WorkflowStage.findOne({
+                  request: request._id,
+                  stageIndex: approvalToken.stageIndex + 1,
+                }))?.recipientEmails || []
+              )[0] || null
+            : null,
+        })
+      );
+    }
+
+    // Only consume the token after validation passes
     approvalToken.isUsed = true;
     approvalToken.usedAt = new Date();
     await approvalToken.save();
-
-    const { remarks } = req.body;
     let stageStatus;
     let requestStatus;
 
     if (act === 'resolved') {
       stageStatus = 'approved_final';
       requestStatus = 'resolved';
-    } else if (act === 'forward') {
+    } else {
       stageStatus = 'approved_forwarded';
       requestStatus = 'in_review';
-    } else {
-      stageStatus = 'rejected';
-      requestStatus = 'rejected';
     }
 
     await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
@@ -77,32 +282,42 @@ const handleApprovalAction = async (req, res) => {
       stageIndex: approvalToken.stageIndex,
       action: stageStatus,
       remarks: remarks || null,
+      handoverNote: handoverNote || null,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
 
     const updateData = { status: requestStatus };
     if (requestStatus === 'resolved') updateData.resolvedAt = new Date();
-    if (requestStatus === 'rejected') {
-      updateData.rejectedAt = new Date();
-      updateData.rejectionReason = remarks;
-    }
     if (act === 'forward') {
       updateData.currentStageIndex = approvalToken.stageIndex + 1;
     }
     await Request.findByIdAndUpdate(request._id, updateData);
 
+    const actorEmail = workflowStage.recipientEmails[0] || null;
+
+    const [student, category, school] = await Promise.all([
+      User.findById(request.student),
+      Category.findById(request.category),
+      School.findById(request.school),
+    ]);
+
     // Forward → send action email to next process owner
+    let nextOwnerEmail = null;
     if (act === 'forward') {
       const nextStageIndex = approvalToken.stageIndex + 1;
       const nextStage = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex });
 
       if (nextStage) {
-        const [student, category, school] = await Promise.all([
-          User.findById(request.student),
-          Category.findById(request.category),
-          School.findById(request.school),
-        ]);
+        nextOwnerEmail = (nextStage.recipientEmails || [])[0] || null;
+
+        // Kept on the stage so the note survives in the record, not just the email.
+        if (handoverNote) {
+          await WorkflowStage.findByIdAndUpdate(nextStage._id, {
+            handoverNote,
+            handoverFrom: actorEmail,
+          });
+        }
 
         // canForward = there is yet another stage after the next one
         const stageAfterNext = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex + 1 });
@@ -116,33 +331,43 @@ const handleApprovalAction = async (req, res) => {
           student,
           category,
           school,
+          handoverNote,
         });
       }
     }
 
-    const student = await User.findById(request.student);
+    // FYI copy of this action to the CC list, minus whoever just actioned it.
+    const EVENT_BY_ACTION = {
+      forward: { type: 'forwarded', subjectLabel: 'Forwarded' },
+      resolved: { type: 'resolved', subjectLabel: 'Resolved' },
+    };
 
-    const notifTitle =
-      requestStatus === 'resolved' ? 'Request Resolved'
-      : requestStatus === 'rejected' ? 'Request Rejected'
-      : 'Request Forwarded';
+    await sendCcFyiEmail({
+      request,
+      workflowStage,
+      student,
+      category,
+      school,
+      excludeActor: actorEmail,
+      event: { ...EVENT_BY_ACTION[act], actorEmail, remarks, nextOwnerEmail },
+    });
+
+    const notifTitle = requestStatus === 'resolved' ? 'Request Resolved' : 'Request Forwarded';
 
     const notifBody =
       requestStatus === 'resolved'
-        ? `Your request #${request.ticketId} has been resolved.`
-        : requestStatus === 'rejected'
-        ? `Your request #${request.ticketId} was rejected${remarks ? ': ' + remarks : '.'}`
-        : `Your request #${request.ticketId} has been forwarded to the next process owner for review.`;
+        ? `Your request #${request.ticketId} has been resolved.${remarks ? ' ' + remarks : ''}`
+        : `Your request #${request.ticketId} has been forwarded to the next process owner for review.${remarks ? ' ' + remarks : ''}`;
 
     await Notification.create({
       user: student._id,
       title: notifTitle,
       body: notifBody,
-      type: requestStatus === 'resolved' ? 'request_resolved' : requestStatus === 'rejected' ? 'request_rejected' : 'stage_approved',
+      type: requestStatus === 'resolved' ? 'request_resolved' : 'stage_approved',
       request: request._id,
     });
 
-    const studentEmailStatus = requestStatus === 'resolved' ? 'resolved' : requestStatus === 'rejected' ? 'rejected' : 'approved_forwarded';
+    const studentEmailStatus = requestStatus === 'resolved' ? 'resolved' : 'approved_forwarded';
     await sendEmail({
       to: student.email,
       toName: student.name,
@@ -168,9 +393,7 @@ const handleApprovalAction = async (req, res) => {
     const successMessage =
       act === 'resolved'
         ? 'You have marked this request as Resolved. The student has been notified.'
-        : act === 'forward'
-        ? 'Request forwarded to the next process owner. The student has been notified.'
-        : 'Request rejected. The student has been notified.';
+        : 'Request forwarded to the next process owner. The student has been notified.';
 
     return res.status(200).send(buildResultPage('success', successMessage, request.ticketId, act));
   } catch (err) {
@@ -184,12 +407,7 @@ const buildResultPage = (type, message, ticketId, action) => {
   const icon = isSuccess ? '✓' : '✗';
   const color = isSuccess ? '#1a7a3a' : '#c0392b';
   const bgColor = isSuccess ? '#d5f5e3' : '#fde8e8';
-  const actionLabel =
-    action === 'resolved'
-      ? 'Resolved'
-      : action === 'forward'
-      ? 'Forwarded'
-      : 'Rejected';
+  const actionLabel = action === 'resolved' ? 'Resolved' : 'Forwarded';
 
   return `<!DOCTYPE html>
 <html>
@@ -219,4 +437,4 @@ const buildResultPage = (type, message, ticketId, action) => {
 </html>`;
 };
 
-module.exports = { handleApprovalAction };
+module.exports = { handleApprovalAction, showApprovalForm };

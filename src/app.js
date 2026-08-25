@@ -15,6 +15,7 @@ const approvalRoutes = require('./routes/approvals');
 const notificationRoutes = require('./routes/notifications');
 const adminStudentRoutes = require('./routes/adminStudents');
 const settingRoutes = require('./routes/settings');
+const { startEscalationSweeper } = require('./services/escalationService');
 
 const app = express();
 
@@ -100,6 +101,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`MR One backend running on port ${PORT}`);
+  startEscalationSweeper();
 });
 
 module.exports = app;

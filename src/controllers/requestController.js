@@ -4,7 +4,8 @@ const Category = require('../models/Category');
 const School = require('../models/School');
 const Notification = require('../models/Notification');
 const generateTicketId = require('../utils/generateTicketId');
-const { sendApprovalEmail } = require('../services/workflowService');
+const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowService');
+const { resolveRecipients } = require('../utils/recipients');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
 
@@ -27,9 +28,18 @@ const createRequest = async (req, res) => {
     if (!category) return errorResponse(res, 'Category not found', 404);
     if (!school) return errorResponse(res, 'School not found', 404);
 
-    const processOwners = (category.processOwners || []).filter(Boolean);
+    // @dean / @hod resolve against this student's school, so one category can
+    // route to whichever dean actually owns them.
+    const processOwners = resolveRecipients(category.processOwners, school);
     if (processOwners.length === 0) {
-      return errorResponse(res, 'This category has no process owners configured. Please contact admin.', 400);
+      const usesDynamic = (category.processOwners || []).some((o) => String(o).startsWith('@'));
+      return errorResponse(
+        res,
+        usesDynamic
+          ? `This category routes to your school's dean/HOD, but ${school.name} has no such contact on record. Please contact admin.`
+          : 'This category has no process owners configured. Please contact admin.',
+        400
+      );
     }
 
     const attachments = (req.files || []).map((f) => ({
@@ -48,11 +58,14 @@ const createRequest = async (req, res) => {
 
     const totalStages = processOwners.length;
 
-    // CC = school dean + category CC (dean gets informed, not action emails)
-    const ccEmails = [
-      ...(school.deanEmail ? [school.deanEmail] : []),
-      ...(category.ccEmails || []),
-    ].filter(Boolean);
+    // FYI copies go only to the category's explicit CC list. Nobody is added
+    // implicitly — a dean or HOD is copied only if their address was put there.
+    const ccEmails = resolveRecipients(category.ccEmails, school);
+
+    const escalation = category.escalation || {};
+    const escalationRecipients = escalation.enabled
+      ? resolveRecipients(escalation.recipients, school)
+      : [];
 
     const request = await Request.create({
       ticketId,
@@ -73,6 +86,8 @@ const createRequest = async (req, res) => {
       stageName: `Stage ${idx + 1} — ${category.name}`,
       recipientEmails: [ownerEmail],
       ccEmails,
+      escalationRecipients,
+      escalateAfterHours: escalation.enabled ? escalation.afterHours || 48 : undefined,
     }));
 
     const stages = await WorkflowStage.insertMany(
@@ -88,6 +103,14 @@ const createRequest = async (req, res) => {
         workflowStage: stages[0],
         stageIndex: 0,
         canForward,
+        student: req.user,
+        category,
+        school,
+      });
+
+      await sendCcFyiEmail({
+        request,
+        workflowStage: stages[0],
         student: req.user,
         category,
         school,
@@ -161,7 +184,11 @@ const getRequestById = async (req, res) => {
 
     if (!request) return errorResponse(res, 'Request not found', 404);
 
-    const stages = await WorkflowStage.find({ request: request._id }).sort({ stageIndex: 1 });
+    // handoverNote is written for the next process owner only and is promised
+    // as private to them, so it never goes out on a student-facing response.
+    const stages = await WorkflowStage.find({ request: request._id })
+      .select('-handoverNote -handoverFrom -escalationRecipients')
+      .sort({ stageIndex: 1 });
 
     return successResponse(res, { request, stages });
   } catch (err) {
@@ -181,7 +208,11 @@ const getRequestByTicketId = async (req, res) => {
 
     if (!request) return errorResponse(res, 'Request not found', 404);
 
-    const stages = await WorkflowStage.find({ request: request._id }).sort({ stageIndex: 1 });
+    // handoverNote is written for the next process owner only and is promised
+    // as private to them, so it never goes out on a student-facing response.
+    const stages = await WorkflowStage.find({ request: request._id })
+      .select('-handoverNote -handoverFrom -escalationRecipients')
+      .sort({ stageIndex: 1 });
 
     return successResponse(res, { request, stages });
   } catch (err) {

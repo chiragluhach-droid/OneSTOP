@@ -1,3 +1,7 @@
+// Deep link into the app. The mobile app registers the "onestop" scheme
+// (mobile/app.json), and /track is the request timeline screen.
+const APP_LINK = process.env.APP_DEEP_LINK || 'onestop://track';
+
 const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName }) => {
   const statusConfig = {
     pending: { color: '#e67e22', label: 'Pending Review', icon: '⏳' },
@@ -19,7 +23,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
   return `
 <!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:30px 0;">
     <tr><td align="center">
@@ -27,7 +31,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
         <tr>
           <td style="background:#8B1A1A;padding:24px 32px;">
             <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">MR One</h1>
-            <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University — Request Update</p>
+            <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University</p>
           </td>
         </tr>
         <tr>
@@ -47,14 +51,27 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
         </tr>
         ${remarksSection}
         <tr>
-          <td style="padding:20px 32px 32px;">
-            <p style="margin:0;font-size:13px;color:#888;">Open the MR One app to view the full timeline of your request.</p>
+          <td style="padding:24px 32px 32px;" align="center">
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
+              <tr>
+                <td style="border-radius:999px;background:#8B1A1A;box-shadow:0 2px 8px rgba(139,26,26,0.28);">
+                  <a href="${APP_LINK}"
+                     style="display:inline-block;padding:14px 34px;border-radius:999px;color:#ffffff;
+                            text-decoration:none;font-size:15px;font-weight:700;letter-spacing:0.3px;">
+                    Open in MR One &nbsp;&rsaquo;
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:14px 0 0;font-size:12px;color:#aaa;">
+              Opens your request timeline in the app.
+            </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
-              MR One — Manav Rachna University | Automated Workflow Platform
+              MR One — Manav Rachna University
             </p>
           </td>
         </tr>

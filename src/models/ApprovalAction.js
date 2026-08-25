@@ -13,6 +13,7 @@ const approvalActionSchema = new mongoose.Schema(
       required: true,
     },
     remarks: { type: String },
+    handoverNote: { type: String },
     ipAddress: { type: String },
     userAgent: { type: String },
   },

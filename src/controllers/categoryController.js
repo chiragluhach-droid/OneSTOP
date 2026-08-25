@@ -1,6 +1,25 @@
 const Category = require('../models/Category');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 
+// Accepts either a real array or a comma-separated string, so the admin UI and
+// any hand-rolled request both work.
+const toArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map((v) => String(v).trim()).filter(Boolean);
+  return String(val).split(',').map((v) => v.trim()).filter(Boolean);
+};
+
+const normaliseEscalation = (raw) => {
+  if (!raw || typeof raw !== 'object') return undefined;
+
+  const hours = parseInt(raw.afterHours, 10);
+  return {
+    enabled: Boolean(raw.enabled),
+    afterHours: Number.isFinite(hours) && hours > 0 ? hours : 48,
+    recipients: toArray(raw.recipients),
+  };
+};
+
 const getCategories = async (req, res) => {
   try {
     const categories = await Category.find({ isActive: true }).sort({ name: 1 });
@@ -12,14 +31,8 @@ const getCategories = async (req, res) => {
 
 const createCategory = async (req, res) => {
   try {
-    const { name, code, description, icon, processOwners, ccEmails } = req.body;
+    const { name, code, description, icon, processOwners, ccEmails, escalation } = req.body;
     if (!name || !code) return errorResponse(res, 'Name and code required', 400);
-
-    const toArray = (val) => {
-      if (!val) return [];
-      if (Array.isArray(val)) return val.map((v) => v.trim()).filter(Boolean);
-      return val.split(',').map((v) => v.trim()).filter(Boolean);
-    };
 
     const category = await Category.create({
       name: name.trim(),
@@ -28,6 +41,7 @@ const createCategory = async (req, res) => {
       icon,
       processOwners: toArray(processOwners),
       ccEmails: toArray(ccEmails),
+      escalation: normaliseEscalation(escalation),
     });
     return successResponse(res, { category }, 'Category created', 201);
   } catch (err) {
@@ -38,15 +52,20 @@ const createCategory = async (req, res) => {
 
 const updateCategory = async (req, res) => {
   try {
-    const toArray = (val) => {
-      if (!val) return [];
-      if (Array.isArray(val)) return val.map((v) => v.trim()).filter(Boolean);
-      return val.split(',').map((v) => v.trim()).filter(Boolean);
-    };
     const update = { ...req.body };
     if (update.processOwners !== undefined) update.processOwners = toArray(update.processOwners);
     if (update.ccEmails !== undefined) update.ccEmails = toArray(update.ccEmails);
-    const category = await Category.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+
+    if (update.escalation !== undefined) {
+      const normalised = normaliseEscalation(update.escalation);
+      if (normalised) update.escalation = normalised;
+      else delete update.escalation;
+    }
+
+    const category = await Category.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+      runValidators: true,
+    });
     if (!category) return errorResponse(res, 'Category not found', 404);
     return successResponse(res, { category }, 'Category updated');
   } catch (err) {
