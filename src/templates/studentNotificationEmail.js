@@ -1,6 +1,9 @@
-// Deep link into the app. The mobile app registers the "onestop" scheme
-// (mobile/app.json), and /track is the request timeline screen.
-const APP_LINK = process.env.APP_DEEP_LINK || 'onestop://track';
+// Gmail strips hrefs with an unknown scheme, so linking straight to
+// "onestop://" renders a dead button. Point at the https handoff page instead
+// (routes/open.js), which survives sanitising and then opens the app.
+const APP_LINK =
+  process.env.APP_DEEP_LINK ||
+  `${process.env.BACKEND_URL || 'https://api.physiobook.in'}/open/track`;
 
 const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName }) => {
   const statusConfig = {
