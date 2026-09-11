@@ -7,7 +7,7 @@ const notificationSchema = new mongoose.Schema(
     body: { type: String, required: true },
     type: {
       type: String,
-      enum: ['request_submitted', 'stage_approved', 'request_rejected', 'request_resolved', 'general'],
+      enum: ['request_submitted', 'stage_approved', 'request_in_progress', 'request_rejected', 'request_resolved', 'general'],
       default: 'general',
     },
     request: { type: mongoose.Schema.Types.ObjectId, ref: 'Request' },

@@ -2,7 +2,8 @@
 // routing notice and each subsequent action on the ticket. `event` is null for
 // the first copy and describes what happened for the rest.
 const EVENT_STYLES = {
-  forwarded: { badge: 'Forwarded',  color: '#1E3A8A', tint: '#eef2ff', verb: 'forwarded this request' },
+  forwarded:   { badge: 'Forwarded',   color: '#1E3A8A', tint: '#eef2ff', verb: 'forwarded this request' },
+  in_progress: { badge: 'In Progress', color: '#b45309', tint: '#fef3c7', verb: 'has started working on this request' },
   resolved:  { badge: 'Resolved',   color: '#1a7a3a', tint: '#e8f6ec', verb: 'marked this request resolved' },
   rejected:  { badge: 'Rejected',   color: '#c0392b', tint: '#fdeceb', verb: 'rejected this request' },
   escalated: { badge: 'Escalated',  color: '#b45309', tint: '#fef3c7', verb: 'was escalated — no action was taken in time' },

@@ -4,7 +4,9 @@ const auditLogSchema = new mongoose.Schema(
   {
     event: { type: String, required: true },
     actor: { type: String },
-    actorModel: { type: String, enum: ['User', 'Admin', 'System'] },
+    // 'ProcessOwner' is a staff member acting through a one-time email link —
+    // they have no account, so they are neither User nor Admin.
+    actorModel: { type: String, enum: ['User', 'Admin', 'System', 'ProcessOwner'] },
     request: { type: mongoose.Schema.Types.ObjectId, ref: 'Request' },
     metadata: { type: mongoose.Schema.Types.Mixed },
     ipAddress: { type: String },

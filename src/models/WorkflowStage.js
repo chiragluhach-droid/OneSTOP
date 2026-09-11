@@ -12,6 +12,11 @@ const workflowStageSchema = new mongoose.Schema(
       enum: ['pending', 'approved_forwarded', 'approved_final', 'rejected'],
       default: 'pending',
     },
+    // Marking a stage 'in progress' acknowledges it without closing it — the
+    // status stays 'pending' so Resolve / Forward remain available.
+    inProgressAt: { type: Date },
+    inProgressNote: { type: String },
+
     actionTakenAt: { type: Date },
     remarks: { type: String },
     emailSentAt: { type: Date },

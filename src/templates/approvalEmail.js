@@ -11,6 +11,7 @@ const buildApprovalEmail = ({
   attachments,
   resolvedUrl,
   forwardUrl,
+  inProgressUrl,
   canForward,
   handoverNote,
 }) => {
@@ -40,6 +41,11 @@ const buildApprovalEmail = ({
     : '';
 
   const actionButtons = `
+    ${inProgressUrl ? `
+    <a href="${inProgressUrl}"
+       style="display:inline-block;padding:13px 26px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
+      ⏳ In Progress
+    </a>` : ''}
     <a href="${resolvedUrl}"
        style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
       ✓ Resolve
@@ -141,7 +147,7 @@ const buildApprovalEmail = ({
             <div style="flex-wrap:wrap;">${actionButtons}</div>
             <p style="margin:20px 0 0;font-size:12px;color:#aaa;">
               These links expire in 72 hours and can only be used once.
-              ${canForward ? '<br><strong>Forward</strong> passes it to the next process owner — you can add a note for them. <strong>Resolved</strong> closes the request with your message to the student.' : '<br><strong>Resolved</strong> closes the request with your message to the student.'}
+              ${inProgressUrl ? '<br><strong>In Progress</strong> tells the student you are working on it and keeps this request open — you can still Resolve' + (canForward ? ' or Forward' : '') + ' afterwards.' : ''}<br><strong>Resolve</strong> closes the request with your message to the student.${canForward ? '<br><strong>Forward</strong> passes it to the next process owner — you can add a note for them.' : ''}
             </p>
           </td>
         </tr>

@@ -18,11 +18,12 @@ const requestSchema = new mongoose.Schema(
     attachments: [attachmentSchema],
     status: {
       type: String,
-      enum: ['pending', 'in_review', 'approved', 'rejected', 'resolved', 'escalated'],
+      enum: ['pending', 'in_review', 'in_progress', 'approved', 'rejected', 'resolved', 'escalated'],
       default: 'pending',
     },
     currentStageIndex: { type: Number, default: 0 },
     totalStages: { type: Number, default: 4 },
+    inProgressAt: { type: Date },
     resolvedAt: { type: Date },
     rejectedAt: { type: Date },
     rejectionReason: { type: String },

@@ -6,6 +6,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
   const statusConfig = {
     pending: { color: '#e67e22', label: 'Pending Review', icon: '⏳' },
     in_review: { color: '#3498db', label: 'Under Review', icon: '🔍' },
+    in_progress: { color: '#b45309', label: 'In Progress', icon: '⏳' },
     approved_forwarded: { color: '#27ae60', label: 'Approved & Forwarded', icon: '✅' },
     rejected: { color: '#c0392b', label: 'Rejected', icon: '✗' },
     resolved: { color: '#1a7a3a', label: 'Resolved', icon: '🎉' },

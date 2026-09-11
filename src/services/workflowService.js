@@ -83,11 +83,13 @@ const sendApprovalEmail = async ({
 
   // One single-use token per action button.
   const resolvedToken = await createApprovalToken({ request, workflowStage, stageIndex });
+  const inProgressToken = await createApprovalToken({ request, workflowStage, stageIndex });
   const forwardToken = canForward
     ? await createApprovalToken({ request, workflowStage, stageIndex })
     : null;
 
   const resolvedUrl = `${baseUrl}/api/approvals/${resolvedToken}/action?act=resolved`;
+  const inProgressUrl = `${baseUrl}/api/approvals/${inProgressToken}/action?act=in_progress`;
   const forwardUrl = forwardToken ? `${baseUrl}/api/approvals/${forwardToken}/action?act=forward` : null;
 
   await sendEmail({
@@ -97,6 +99,7 @@ const sendApprovalEmail = async ({
       ...ticketFields({ request, student, category, school, workflowStage }),
       resolvedUrl,
       forwardUrl,
+      inProgressUrl,
       canForward,
       handoverNote: handoverNote || workflowStage.handoverNote,
     }),

@@ -9,7 +9,7 @@ const approvalActionSchema = new mongoose.Schema(
     stageIndex: { type: Number, required: true },
     action: {
       type: String,
-      enum: ['approved_forwarded', 'approved_final', 'rejected'],
+      enum: ['approved_forwarded', 'approved_final', 'in_progress', 'rejected'],
       required: true,
     },
     remarks: { type: String },

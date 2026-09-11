@@ -13,7 +13,11 @@ const auditLog = require('../utils/auditLogger');
 
 // Reject was removed — a process owner closes a request with Resolve and
 // explains why in their message to the student.
-const VALID_ACTIONS = ['forward', 'resolved'];
+const VALID_ACTIONS = ['forward', 'resolved', 'in_progress'];
+
+// 'in_progress' is an acknowledgement, not an outcome: it reassures the student
+// and leaves the stage open so Resolve / Forward still work afterwards.
+const ACKNOWLEDGEMENT_ACTIONS = ['in_progress'];
 
 const esc = (v) =>
   String(v ?? '')
@@ -33,6 +37,16 @@ const ACTION_META = {
     remarksLabel: 'Message to student',
     remarksHint: 'Explain how it was resolved — or, if it cannot be done, why. The student sees this.',
     remarksRequired: true,
+  },
+  in_progress: {
+    title: 'Mark In Progress',
+    button: '⏳ Confirm — Notify Student',
+    color: '#b45309',
+    badge: 'In Progress',
+    intro: 'This tells the student you have started working on it. The request stays open and assigned to you.',
+    remarksLabel: 'Message to student',
+    remarksHint: 'Optional — add context or a rough timeline. Leave blank to send the standard update.',
+    remarksRequired: false,
   },
   forward: {
     title: 'Forward Request',
@@ -257,6 +271,109 @@ const handleApprovalAction = async (req, res) => {
     approvalToken.isUsed = true;
     approvalToken.usedAt = new Date();
     await approvalToken.save();
+
+    // ── Acknowledgement: reassure the student, keep the stage open ──
+    // Only this link is consumed. The stage stays 'pending' and its Resolve /
+    // Forward links stay valid, so the owner can still act on it afterwards.
+    if (ACKNOWLEDGEMENT_ACTIONS.includes(act)) {
+      // A stage that has already been resolved or forwarded must not be dragged
+      // back to "in progress" by an older link still sitting in someone's inbox.
+      if (workflowStage.status !== 'pending') {
+        return res.status(400).send(
+          buildResultPage('error', 'This stage has already been actioned, so it can no longer be marked in progress.')
+        );
+      }
+
+      const now = new Date();
+
+      await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
+        inProgressAt: now,
+        inProgressNote: remarks || null,
+      });
+      await Request.findByIdAndUpdate(request._id, {
+        status: 'in_progress',
+        inProgressAt: now,
+      });
+
+      const [student, category, school] = await Promise.all([
+        User.findById(request.student),
+        Category.findById(request.category),
+        School.findById(request.school),
+      ]);
+
+      const actorEmail = workflowStage.recipientEmails[0] || null;
+
+      await ApprovalAction.create({
+        request: request._id,
+        workflowStage: workflowStage._id,
+        actorEmail: actorEmail || 'unknown',
+        stageName: workflowStage.stageName,
+        stageIndex: approvalToken.stageIndex,
+        action: 'in_progress',
+        remarks: remarks || null,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      await Notification.create({
+        user: student._id,
+        title: 'Request In Progress',
+        body: `Your request #${request.ticketId} is being worked on and will be resolved soon.${remarks ? ' ' + remarks : ''}`,
+        type: 'request_in_progress',
+        request: request._id,
+      });
+
+      await sendEmail({
+        to: student.email,
+        subject: `[MR One] Your request #${request.ticketId} — In Progress`,
+        htmlContent: buildStudentNotificationEmail({
+          studentName: student.name,
+          ticketId: request.ticketId,
+          status: 'in_progress',
+          remarks,
+          stageName: workflowStage.stageName,
+        }),
+      });
+
+      await sendCcFyiEmail({
+        request,
+        workflowStage,
+        student,
+        category,
+        school,
+        excludeActor: actorEmail,
+        event: { type: 'in_progress', subjectLabel: 'In Progress', actorEmail, remarks, nextOwnerEmail: null },
+      });
+
+      await auditLog({
+        event: 'APPROVAL_IN_PROGRESS',
+        actor: actorEmail || 'unknown',
+        actorModel: 'ProcessOwner',
+        request: request._id,
+        metadata: { stageIndex: approvalToken.stageIndex, stageName: workflowStage.stageName, remarks },
+        ipAddress: req.ip,
+      });
+
+      const hasNextStage = Boolean(
+        await WorkflowStage.findOne({
+          request: request._id,
+          stageIndex: approvalToken.stageIndex + 1,
+        })
+      );
+
+      return res.status(200).send(
+        buildResultPage(
+          'success',
+          `${student.name} has been told their request is in progress and will be resolved soon.`,
+          request.ticketId,
+          act,
+          `<strong>This request is still open and assigned to you.</strong> Nothing has been closed — `
+            + `when you are ready, use the <strong>Resolve</strong>`
+            + (hasNextStage ? ' or <strong>Forward</strong>' : '')
+            + ` link in the original email. Those links still work.`
+        )
+      );
+    }
     let stageStatus;
     let requestStatus;
 
@@ -402,12 +519,19 @@ const handleApprovalAction = async (req, res) => {
   }
 };
 
-const buildResultPage = (type, message, ticketId, action) => {
+const buildResultPage = (type, message, ticketId, action, footnote) => {
   const isSuccess = type === 'success';
-  const icon = isSuccess ? '✓' : '✗';
-  const color = isSuccess ? '#1a7a3a' : '#c0392b';
-  const bgColor = isSuccess ? '#d5f5e3' : '#fde8e8';
-  const actionLabel = action === 'resolved' ? 'Resolved' : 'Forwarded';
+  // In Progress is a success, but not a closure — amber keeps it visually
+  // distinct from the green "this ticket is done" pages.
+  const acknowledged = isSuccess && action === 'in_progress';
+
+  const icon = !isSuccess ? '✗' : acknowledged ? '⏳' : '✓';
+  const color = !isSuccess ? '#c0392b' : acknowledged ? '#b45309' : '#1a7a3a';
+  const bgColor = !isSuccess ? '#fde8e8' : acknowledged ? '#fef3c7' : '#d5f5e3';
+  const actionLabel =
+    action === 'resolved' ? 'Resolved'
+    : action === 'in_progress' ? 'In Progress'
+    : 'Forwarded';
 
   return `<!DOCTYPE html>
 <html>
@@ -428,6 +552,10 @@ const buildResultPage = (type, message, ticketId, action) => {
       </div>
       ${isSuccess && ticketId ? `<p style="margin:0 0 8px;font-size:13px;color:#888;">Ticket #${ticketId} — ${actionLabel}</p>` : ''}
       <p style="margin:0;font-size:16px;color:#333;line-height:1.6;">${message}</p>
+      ${footnote ? `
+      <div style="margin:24px 0 0;background:${bgColor};border-radius:10px;padding:14px 18px;text-align:left;">
+        <p style="margin:0;font-size:13px;color:#444;line-height:1.6;">${footnote}</p>
+      </div>` : ''}
     </div>
     <div style="background:#f8f8f8;padding:16px 32px;border-top:1px solid #eee;text-align:center;">
       <p style="margin:0;font-size:12px;color:#aaa;">You can close this tab.</p>
