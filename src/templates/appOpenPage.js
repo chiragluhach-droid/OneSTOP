@@ -1,10 +1,28 @@
 // Gmail and most webmail clients strip hrefs with an unknown scheme, so a link
-// straight to `onestop://` renders as a dead button. Emails therefore point at
-// an https URL on our own domain, and this page hands off to the app.
+// straight to `onestop://` renders as a dead button. Emails point at an https
+// URL on our own domain instead, and this page performs the handoff.
 //
-// Handoff is attempted immediately; the fallback only appears if we are still
-// on screen a moment later, which means the app did not take over.
-const buildAppOpenPage = ({ deepLink, label = 'your request' }) => `<!DOCTYPE html>
+// Android gets an `intent://` URL rather than the bare scheme: Chrome (which is
+// what Gmail opens links in) resolves it against the installed package and is
+// far more reliable than assigning `location.href = 'onestop://…'`, which it
+// often blocks as an unrequested navigation. iOS gets the scheme directly.
+const buildAppOpenPage = ({
+  scheme,
+  path,
+  androidPackage,
+  label = 'your request',
+  fallbackUrl,
+  showFallbackImmediately = false,
+}) => {
+  const schemeLink = `${scheme}://${path}`;
+
+  // S.browser_fallback_url sends Chrome back here with ?fallback=1 when the
+  // package isn't installed, instead of showing a raw "can't open page" error.
+  const intentLink =
+    `intent://${path}#Intent;scheme=${scheme};package=${androidPackage};` +
+    `S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -25,11 +43,15 @@ const buildAppOpenPage = ({ deepLink, label = 'your request' }) => `<!DOCTYPE ht
     @keyframes spin{to{transform:rotate(360deg)}}
     h2{font-size:17px;font-weight:700;margin-bottom:8px}
     p.msg{font-size:14px;color:#666;line-height:1.6}
-    .btn{display:block;width:100%;margin-top:24px;padding:15px;background:#8B1A1A;color:#fff;
+    .btn{display:block;width:100%;margin-top:22px;padding:15px;background:#8B1A1A;color:#fff;
          text-decoration:none;border:none;border-radius:999px;font-size:15px;font-weight:700;
-         cursor:pointer;font-family:inherit}
+         cursor:pointer;font-family:inherit;text-align:center}
     .btn:hover{opacity:.92}
-    .hint{margin-top:18px;font-size:12px;color:#999;line-height:1.6}
+    .steps{margin-top:22px;text-align:left;background:#f8f9fa;border-radius:10px;padding:16px 18px}
+    .steps p{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px;
+             font-weight:700;margin-bottom:10px}
+    .steps ol{margin:0;padding-left:18px}
+    .steps li{font-size:13px;color:#555;line-height:1.7}
     .ftr{background:#f8f8f8;padding:14px 28px;border-top:1px solid #eee;text-align:center}
     .ftr p{font-size:12px;color:#aaa}
     [hidden]{display:none!important}
@@ -43,22 +65,28 @@ const buildAppOpenPage = ({ deepLink, label = 'your request' }) => `<!DOCTYPE ht
     </div>
 
     <div class="body">
-      <div id="loading">
+      <div id="loading"${showFallbackImmediately ? ' hidden' : ''}>
         <div class="spinner"></div>
         <h2>Opening the MR One app…</h2>
         <p class="msg">Taking you to ${label}.</p>
+        <a class="btn" id="manual" href="${schemeLink}">Open the app</a>
       </div>
 
-      <div id="fallback" hidden>
-        <h2>Couldn&rsquo;t open the app</h2>
+      <div id="fallback"${showFallbackImmediately ? '' : ' hidden'}>
+        <h2>The app didn&rsquo;t open</h2>
         <p class="msg">
-          Make sure the MR One app is installed on this phone, then try again.
-          On a computer, open this link on your phone instead.
+          This link opens the <strong>MR One</strong> app, which needs to be installed
+          on this phone.
         </p>
-        <button class="btn" id="retry" type="button">Try again</button>
-        <p class="hint">
-          Already installed? Open MR One manually and go to <strong>Track Requests</strong>.
-        </p>
+        <a class="btn" id="retry" href="${schemeLink}">Try again</a>
+        <div class="steps">
+          <p>If it still doesn&rsquo;t open</p>
+          <ol>
+            <li>Open this email on your <strong>phone</strong>, not a computer.</li>
+            <li>Check the MR One app is installed.</li>
+            <li>Or open MR One yourself and go to <strong>Track Requests</strong>.</li>
+          </ol>
+        </div>
       </div>
     </div>
 
@@ -67,31 +95,40 @@ const buildAppOpenPage = ({ deepLink, label = 'your request' }) => `<!DOCTYPE ht
 
   <script>
     (function () {
-      var link = ${JSON.stringify(deepLink)};
+      var schemeLink = ${JSON.stringify(schemeLink)};
+      var intentLink = ${JSON.stringify(intentLink)};
+      var isAndroid = /android/i.test(navigator.userAgent);
+      var target = isAndroid ? intentLink : schemeLink;
       var handedOff = false;
 
+      // Point the visible buttons at whichever form this platform needs.
+      ['manual', 'retry'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.setAttribute('href', target);
+      });
+
+      if (${showFallbackImmediately ? 'true' : 'false'}) return;
+
       // If the app takes over, this tab is backgrounded — don't flash the fallback.
-      function onHide() { if (document.visibilityState === 'hidden') handedOff = true; }
-      document.addEventListener('visibilitychange', onHide);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') handedOff = true;
+      });
       window.addEventListener('pagehide', function () { handedOff = true; });
+      window.addEventListener('blur', function () { handedOff = true; });
 
-      function open() {
-        try { window.location.href = link; } catch (e) {}
-      }
+      try { window.location.href = target; } catch (e) {}
 
-      function showFallback() {
+      // Android with a browser_fallback_url navigates away on its own, so only
+      // non-Android needs this to reveal the fallback.
+      setTimeout(function () {
         if (handedOff || document.visibilityState === 'hidden') return;
         document.getElementById('loading').hidden = true;
         document.getElementById('fallback').hidden = false;
-      }
-
-      document.getElementById('retry').addEventListener('click', open);
-
-      open();
-      setTimeout(showFallback, 1600);
+      }, 2000);
     })();
   </script>
 </body>
 </html>`;
+};
 
 module.exports = { buildAppOpenPage };
