@@ -6,6 +6,7 @@ const { buildApprovalEmail } = require('../templates/approvalEmail');
 const { buildCCInfoEmail } = require('../templates/ccInfoEmail');
 const { buildEscalationEmail } = require('../templates/escalationEmail');
 const { excludeEmail } = require('../utils/recipients');
+const { INTAKE_EMAIL } = require('../config/intake');
 
 const APPROVAL_EXPIRES_HOURS = parseInt(process.env.APPROVAL_TOKEN_EXPIRES_HOURS) || 72;
 
@@ -40,25 +41,31 @@ const ticketFields = ({ request, student, category, school, workflowStage }) => 
 });
 
 /**
- * FYI copy for the CC list. Sent for the initial routing and again on every
- * action, minus whoever took that action — they already know.
+ * Read-only update about the request. Two kinds of recipient:
+ *
+ *  - the intake desk, so it stays informed about anything a forwarded person
+ *    does to a request it passed on. When the desk itself is the actor it is
+ *    filtered out below, so it never gets an FYI about its own action.
+ *  - any extra addresses the category lists in ccEmails (normally none).
+ *
+ * Anyone who already received a direct action email about this same event is
+ * removed, so nobody is told the same thing twice.
  */
 const sendCcFyiEmail = async ({
   request, workflowStage, student, category, school, event = null, excludeActor = null,
 }) => {
-  // Anyone who already got a direct action email about this same event doesn't
-  // also need an FYI copy of it — the same address is often both a process
-  // owner and a CC recipient.
   const alreadyEmailed = [
     excludeActor,
     ...(workflowStage.recipientEmails || []),
     event?.nextOwnerEmail,
   ].filter(Boolean);
 
-  const recipients = alreadyEmailed.reduce(
-    (list, email) => excludeEmail(list, email),
-    workflowStage.ccEmails || []
+  const audience = [INTAKE_EMAIL, ...(workflowStage.ccEmails || [])];
+  const deduped = audience.filter(
+    (email, i) => audience.findIndex((e) => e.toLowerCase() === email.toLowerCase()) === i
   );
+
+  const recipients = alreadyEmailed.reduce((list, email) => excludeEmail(list, email), deduped);
   if (recipients.length === 0) return;
 
   const subjectLine = event
