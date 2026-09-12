@@ -49,4 +49,7 @@ const excludeEmail = (list, email) => {
   return (list || []).filter((e) => String(e).toLowerCase() !== lower);
 };
 
-module.exports = { DYNAMIC_RECIPIENTS, isDynamic, labelFor, resolveRecipients, excludeEmail };
+/** Loose but practical address check for addresses typed into the forward form. */
+const isEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+
+module.exports = { DYNAMIC_RECIPIENTS, isDynamic, labelFor, resolveRecipients, excludeEmail, isEmail };

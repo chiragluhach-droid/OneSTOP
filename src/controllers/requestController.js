@@ -6,6 +6,7 @@ const Notification = require('../models/Notification');
 const generateTicketId = require('../utils/generateTicketId');
 const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowService');
 const { resolveRecipients } = require('../utils/recipients');
+const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
 
@@ -28,19 +29,6 @@ const createRequest = async (req, res) => {
     if (!category) return errorResponse(res, 'Category not found', 404);
     if (!school) return errorResponse(res, 'School not found', 404);
 
-    // @dean / @hod resolve against this student's school, so one category can
-    // route to whichever dean actually owns them.
-    const processOwners = resolveRecipients(category.processOwners, school);
-    if (processOwners.length === 0) {
-      const usesDynamic = (category.processOwners || []).some((o) => String(o).startsWith('@'));
-      return errorResponse(
-        res,
-        usesDynamic
-          ? `This category routes to your school's dean/HOD, but ${school.name} has no such contact on record. Please contact admin.`
-          : 'This category has no process owners configured. Please contact admin.',
-        400
-      );
-    }
 
     const attachments = (req.files || []).map((f) => ({
       url: f.location,
@@ -55,8 +43,6 @@ const createRequest = async (req, res) => {
       ticketId = generateTicketId();
       exists = await Request.findOne({ ticketId });
     }
-
-    const totalStages = processOwners.length;
 
     // FYI copies go only to the category's explicit CC list. Nobody is added
     // implicitly — a dean or HOD is copied only if their address was put there.
@@ -77,24 +63,25 @@ const createRequest = async (req, res) => {
       attachments,
       status: 'pending',
       currentStageIndex: 0,
-      totalStages,
+      // The chain length isn't known up front any more — each forward appends
+      // a stage, so this grows as the request moves.
+      totalStages: 1,
     });
 
-    // One stage per process owner — routing purely from category data
-    const stageDefinitions = processOwners.map((ownerEmail, idx) => ({
-      stageIndex: idx,
-      stageName: `Stage ${idx + 1} — ${category.name}`,
-      recipientEmails: [ownerEmail],
+    // A single intake stage. Whoever holds the request decides where it goes
+    // next by typing an address into the Forward form.
+    const intakeStage = await WorkflowStage.create({
+      request: request._id,
+      stageIndex: 0,
+      stageName: `${INTAKE_LABEL} — ${category.name}`,
+      recipientEmails: [INTAKE_EMAIL],
       ccEmails,
       escalationRecipients,
       escalateAfterHours: escalation.enabled ? escalation.afterHours || 48 : undefined,
-    }));
+      status: 'pending',
+    });
 
-    const stages = await WorkflowStage.insertMany(
-      stageDefinitions.map((s) => ({ ...s, request: request._id, status: 'pending' }))
-    );
-
-    const canForward = totalStages > 1; // stage 0 can forward to stage 1 if multiple owners
+    const stages = [intakeStage];
 
     const isDemo = req.user.email === 'demo@onestop.mru.edu.in';
     if (!isDemo) {
@@ -102,7 +89,7 @@ const createRequest = async (req, res) => {
         request,
         workflowStage: stages[0],
         stageIndex: 0,
-        canForward,
+        canForward: true,
         student: req.user,
         category,
         school,

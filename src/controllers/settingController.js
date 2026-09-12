@@ -1,4 +1,5 @@
 const Setting = require('../models/Setting');
+const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 
 // GET /api/settings/features — public, no auth required
@@ -35,4 +36,9 @@ const updateFeatures = async (req, res) => {
   }
 };
 
-module.exports = { getFeatures, updateFeatures };
+// GET /api/settings/routing — admin only. Lets the dashboard show where
+// requests actually land instead of duplicating the constant.
+const getRouting = async (req, res) =>
+  successResponse(res, { routing: { intakeEmail: INTAKE_EMAIL, intakeLabel: INTAKE_LABEL } }, 'Routing fetched');
+
+module.exports = { getFeatures, updateFeatures, getRouting };

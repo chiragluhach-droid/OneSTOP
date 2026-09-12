@@ -10,6 +10,7 @@ const { sendEmail } = require('../services/emailService');
 const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowService');
 const { buildStudentNotificationEmail } = require('../templates/studentNotificationEmail');
 const auditLog = require('../utils/auditLogger');
+const { isEmail } = require('../utils/recipients');
 
 // Reject was removed — a process owner closes a request with Resolve and
 // explains why in their message to the student.
@@ -53,16 +54,18 @@ const ACTION_META = {
     button: '→ Confirm Forward',
     color: '#1E3A8A',
     badge: 'Forwarding',
-    intro: 'This sends the request to the next process owner. The student is notified.',
+    intro: 'Send this request to whoever should handle it. They get the same options you have, and can forward it onwards themselves.',
+    forwardToLabel: 'Forward to',
+    forwardToHint: 'Any university email address. They receive the full request with their own action links.',
     remarksLabel: 'Note to student',
-    remarksHint: 'Optional — tell the student why it is being forwarded.',
+    remarksHint: 'Optional — tell the student why it is being forwarded. The student is told who it went to.',
     remarksRequired: false,
-    handoverLabel: 'Note to the next process owner',
-    handoverHint: 'Optional — what you already did, and what they need to do. Only they see this.',
+    handoverLabel: 'Note to that person',
+    handoverHint: 'Optional — what you already did, and what they need to do. The student does not see this.',
   },
 };
 
-const buildFormPage = ({ act, token, ticketId, subject, description, studentName, categoryName, stageName, errorMessage, previousRemarks, previousHandover, nextOwnerEmail }) => {
+const buildFormPage = ({ act, token, ticketId, subject, description, studentName, categoryName, stageName, errorMessage, previousRemarks, previousHandover, previousForwardTo }) => {
   const meta = ACTION_META[act];
   const required = meta.remarksRequired ? '<span style="color:#c0392b;"> *</span>' : '';
 
@@ -95,6 +98,10 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
     .f-hint{font-size:12px;color:#999;margin-bottom:8px}
     textarea{width:100%;min-height:110px;padding:14px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;transition:border-color .2s;color:#333;background:#fafafa}
     textarea:focus{outline:none;border-color:${meta.color};background:#fff}
+    .f-input{width:100%;padding:14px;border:2px solid #e0e0e0;border-radius:10px;font-size:15px;
+             font-family:inherit;color:#333;background:#fafafa}
+    .f-input:focus{outline:none;border-color:${meta.color};background:#fff}
+    .divider{margin:22px 0 18px;border-top:1px dashed #dcdcdc}
     .handover{margin-top:22px;padding-top:20px;border-top:1px dashed #dcdcdc}
     .err-msg{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#dc2626}
     .submit-btn{display:block;width:100%;padding:16px;background:${meta.color};color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .2s;font-family:inherit;margin-top:16px;letter-spacing:.3px}
@@ -126,13 +133,20 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
     </div>
     <form method="POST" action="?act=${act}" class="form-section" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Submitting…';">
       ${errorMessage ? `<div class="err-msg">${esc(errorMessage)}</div>` : ''}
+      ${meta.forwardToLabel ? `
+      <div class="f-label">${esc(meta.forwardToLabel)}<span style="color:#c0392b;"> *</span></div>
+      <div class="f-hint">${esc(meta.forwardToHint)}</div>
+      <input class="f-input" type="email" name="forwardTo" required
+             placeholder="name@mru.edu.in" value="${esc(previousForwardTo || '')}"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="divider"></div>` : ''}
       <div class="f-label">${esc(meta.remarksLabel)}${required}</div>
       <div class="f-hint">${esc(meta.remarksHint)}</div>
       <textarea name="remarks" placeholder="Type your message here...">${esc(previousRemarks || '')}</textarea>
       ${meta.handoverLabel ? `
       <div class="handover">
         <div class="f-label">${esc(meta.handoverLabel)}</div>
-        <div class="f-hint">${esc(meta.handoverHint)}${nextOwnerEmail ? ` Goes to <strong>${esc(nextOwnerEmail)}</strong>.` : ''}</div>
+        <div class="f-hint">${esc(meta.handoverHint)}</div>
         <textarea name="handoverNote" placeholder="e.g. I have verified the documents — please approve the fee waiver.">${esc(previousHandover || '')}</textarea>
       </div>` : ''}
       <input type="hidden" name="act" value="${act}">
@@ -178,11 +192,6 @@ const showApprovalForm = async (req, res) => {
       Category.findById(request.category),
     ]);
 
-    // Naming the recipient makes the handover note concrete rather than abstract.
-    const nextStage = act === 'forward'
-      ? await WorkflowStage.findOne({ request: request._id, stageIndex: approvalToken.stageIndex + 1 })
-      : null;
-
     return res.status(200).send(
       buildFormPage({
         act,
@@ -193,7 +202,6 @@ const showApprovalForm = async (req, res) => {
         studentName: student?.name,
         categoryName: category?.name,
         stageName: workflowStage.stageName,
-        nextOwnerEmail: (nextStage?.recipientEmails || [])[0] || null,
       })
     );
   } catch (err) {
@@ -235,9 +243,31 @@ const handleApprovalAction = async (req, res) => {
 
     const remarks = typeof req.body.remarks === 'string' ? req.body.remarks.trim() : '';
     const handoverNote = typeof req.body.handoverNote === 'string' ? req.body.handoverNote.trim() : '';
+    const forwardTo = typeof req.body.forwardTo === 'string'
+      ? req.body.forwardTo.trim().toLowerCase()
+      : '';
 
-    // If remarks are required but missing, re-render the form WITHOUT consuming the token
+    const actorEmailEarly = (workflowStage.recipientEmails || [])[0] || null;
+
+    // Work out what's wrong before touching the token, so a fixable mistake
+    // doesn't burn a single-use link.
+    let validationError = null;
     if (ACTION_META[act].remarksRequired && !remarks) {
+      validationError = `${ACTION_META[act].remarksLabel} is required.`;
+    } else if (act === 'forward') {
+      const studentEmail = (await User.findById(request.student).select('email').lean())?.email || '';
+      if (!forwardTo) {
+        validationError = 'Enter the email address to forward this request to.';
+      } else if (!isEmail(forwardTo)) {
+        validationError = `"${forwardTo}" is not a valid email address.`;
+      } else if (actorEmailEarly && forwardTo === actorEmailEarly.toLowerCase()) {
+        validationError = 'That is your own address — forward it to someone else.';
+      } else if (studentEmail && forwardTo === studentEmail.toLowerCase()) {
+        validationError = 'That is the student\'s own address. Use Resolve to reply to them instead.';
+      }
+    }
+
+    if (validationError) {
       const [student, category] = await Promise.all([
         User.findById(request.student),
         Category.findById(request.category),
@@ -252,17 +282,10 @@ const handleApprovalAction = async (req, res) => {
           studentName: student?.name,
           categoryName: category?.name,
           stageName: workflowStage.stageName,
-          errorMessage: `${ACTION_META[act].remarksLabel} is required.`,
+          errorMessage: validationError,
           previousRemarks: remarks,
           previousHandover: handoverNote,
-          nextOwnerEmail: act === 'forward'
-            ? (
-                (await WorkflowStage.findOne({
-                  request: request._id,
-                  stageIndex: approvalToken.stageIndex + 1,
-                }))?.recipientEmails || []
-              )[0] || null
-            : null,
+          previousForwardTo: forwardTo,
         })
       );
     }
@@ -419,38 +442,42 @@ const handleApprovalAction = async (req, res) => {
       School.findById(request.school),
     ]);
 
-    // Forward → send action email to next process owner
+    // Forward → append a brand new stage for whoever was named on the form.
+    // The chain has no predefined length: each hop is decided by the person
+    // currently holding the request, and they can forward onwards in turn.
     let nextOwnerEmail = null;
     if (act === 'forward') {
       const nextStageIndex = approvalToken.stageIndex + 1;
-      const nextStage = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex });
+      nextOwnerEmail = forwardTo;
 
-      if (nextStage) {
-        nextOwnerEmail = (nextStage.recipientEmails || [])[0] || null;
+      const nextStage = await WorkflowStage.create({
+        request: request._id,
+        stageIndex: nextStageIndex,
+        stageName: `Forwarded — ${category.name}`,
+        recipientEmails: [forwardTo],
+        // The FYI list and escalation window follow the request down the chain.
+        ccEmails: workflowStage.ccEmails || [],
+        escalationRecipients: workflowStage.escalationRecipients || [],
+        escalateAfterHours: workflowStage.escalateAfterHours,
+        handoverNote: handoverNote || undefined,
+        handoverFrom: handoverNote ? actorEmail : undefined,
+        status: 'pending',
+      });
 
-        // Kept on the stage so the note survives in the record, not just the email.
-        if (handoverNote) {
-          await WorkflowStage.findByIdAndUpdate(nextStage._id, {
-            handoverNote,
-            handoverFrom: actorEmail,
-          });
-        }
+      await Request.findByIdAndUpdate(request._id, {
+        totalStages: Math.max(request.totalStages || 1, nextStageIndex + 1),
+      });
 
-        // canForward = there is yet another stage after the next one
-        const stageAfterNext = await WorkflowStage.findOne({ request: request._id, stageIndex: nextStageIndex + 1 });
-        const canForward = !!stageAfterNext;
-
-        await sendApprovalEmail({
-          request,
-          workflowStage: nextStage,
-          stageIndex: nextStage.stageIndex,
-          canForward,
-          student,
-          category,
-          school,
-          handoverNote,
-        });
-      }
+      await sendApprovalEmail({
+        request,
+        workflowStage: nextStage,
+        stageIndex: nextStage.stageIndex,
+        canForward: true, // whoever holds it may always pass it on
+        student,
+        category,
+        school,
+        handoverNote,
+      });
     }
 
     // FYI copy of this action to the CC list, minus whoever just actioned it.
@@ -474,7 +501,7 @@ const handleApprovalAction = async (req, res) => {
     const notifBody =
       requestStatus === 'resolved'
         ? `Your request #${request.ticketId} has been resolved.${remarks ? ' ' + remarks : ''}`
-        : `Your request #${request.ticketId} has been forwarded to the next process owner for review.${remarks ? ' ' + remarks : ''}`;
+        : `Your request #${request.ticketId} has been forwarded to ${nextOwnerEmail} for review.${remarks ? ' ' + remarks : ''}`;
 
     await Notification.create({
       user: student._id,
@@ -495,6 +522,7 @@ const handleApprovalAction = async (req, res) => {
         status: studentEmailStatus,
         remarks,
         stageName: workflowStage.stageName,
+        forwardedTo: nextOwnerEmail,
       }),
     });
 
@@ -503,14 +531,14 @@ const handleApprovalAction = async (req, res) => {
       actor: workflowStage.recipientEmails[0] || 'unknown',
       actorModel: 'ProcessOwner',
       request: request._id,
-      metadata: { stageIndex: approvalToken.stageIndex, stageName: workflowStage.stageName, action: act, remarks },
+      metadata: { stageIndex: approvalToken.stageIndex, stageName: workflowStage.stageName, action: act, remarks, forwardedTo: nextOwnerEmail || undefined },
       ipAddress: req.ip,
     });
 
     const successMessage =
       act === 'resolved'
         ? 'You have marked this request as Resolved. The student has been notified.'
-        : 'Request forwarded to the next process owner. The student has been notified.';
+        : `Request forwarded to ${nextOwnerEmail}. They have been emailed, and the student has been told who it went to.`;
 
     return res.status(200).send(buildResultPage('success', successMessage, request.ticketId, act));
   } catch (err) {

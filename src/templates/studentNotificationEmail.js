@@ -5,17 +5,29 @@ const APP_LINK =
   process.env.APP_DEEP_LINK ||
   `${process.env.BACKEND_URL || 'https://api.physiobook.in'}/open/track`;
 
-const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName }) => {
+const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName, forwardedTo }) => {
   const statusConfig = {
     pending: { color: '#e67e22', label: 'Pending Review', icon: '⏳' },
     in_review: { color: '#3498db', label: 'Under Review', icon: '🔍' },
     in_progress: { color: '#b45309', label: 'In Progress', icon: '⏳' },
-    approved_forwarded: { color: '#27ae60', label: 'Approved & Forwarded', icon: '✅' },
+    approved_forwarded: { color: '#1E3A8A', label: 'Forwarded', icon: '📨' },
     rejected: { color: '#c0392b', label: 'Rejected', icon: '✗' },
     resolved: { color: '#1a7a3a', label: 'Resolved', icon: '🎉' },
   };
 
   const cfg = statusConfig[status] || statusConfig.pending;
+
+  const forwardedSection = forwardedTo
+    ? `<tr><td style="padding:4px 32px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background:#eef2ff;border-left:4px solid #1E3A8A;border-radius:6px;">
+          <tr><td style="padding:14px 18px;">
+            <p style="margin:0 0 4px;font-size:11px;color:#1E3A8A;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Now with</p>
+            <p style="margin:0;font-size:14px;color:#333;font-weight:600;word-break:break-all;">${forwardedTo}</p>
+            <p style="margin:6px 0 0;font-size:12px;color:#666;">They will review your request and respond.</p>
+          </td></tr>
+        </table>
+       </td></tr>`
+    : '';
 
   const remarksSection = remarks
     ? `<tr><td style="padding:16px 32px 0;">
@@ -53,6 +65,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
             </div>
           </td>
         </tr>
+        ${forwardedSection}
         ${remarksSection}
         <tr>
           <td style="padding:24px 32px 32px;" align="center">
