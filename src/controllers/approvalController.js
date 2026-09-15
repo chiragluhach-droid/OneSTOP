@@ -309,9 +309,15 @@ const handleApprovalAction = async (req, res) => {
 
       const now = new Date();
 
+      // Saved to `remarks` rather than a dedicated field: every mobile build ever
+      // shipped renders stage.remarks on the timeline, whereas a new field would
+      // need an app update before students could see it. The prefix keeps it
+      // readable in older builds, which still label a pending stage "Awaiting".
       await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
         inProgressAt: now,
-        inProgressNote: remarks || null,
+        remarks: remarks
+          ? `In progress — ${remarks}`
+          : 'In progress — being worked on, will be resolved soon.',
       });
       await Request.findByIdAndUpdate(request._id, {
         status: 'in_progress',
@@ -411,7 +417,7 @@ const handleApprovalAction = async (req, res) => {
     await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
       status: stageStatus,
       actionTakenAt: new Date(),
-      remarks: remarks || null,
+      remarks: remarks || workflowStage.remarks || null,
     });
 
     await ApprovalAction.create({
