@@ -46,15 +46,15 @@ const buildApprovalEmail = ({
        style="display:inline-block;padding:13px 26px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
       ⏳ In Progress
     </a>` : ''}
-    <a href="${resolvedUrl}"
-       style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
-      ✓ Resolve
-    </a>
     ${canForward && forwardUrl ? `
     <a href="${forwardUrl}"
-       style="display:inline-block;padding:13px 26px;background:#1E3A8A;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-bottom:10px;">
+       style="display:inline-block;padding:13px 26px;background:#1E3A8A;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-right:10px;margin-bottom:10px;">
       → Forward
-    </a>` : ''}`;
+    </a>` : ''}
+    <a href="${resolvedUrl}"
+       style="display:inline-block;padding:13px 26px;background:#1a7a3a;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;margin-bottom:10px;">
+      ✓ Resolve
+    </a>`;
 
   return `
 <!DOCTYPE html>

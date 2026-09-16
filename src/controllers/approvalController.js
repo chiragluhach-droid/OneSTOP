@@ -396,8 +396,8 @@ const handleApprovalAction = async (req, res) => {
           `${student.name} has been told their request is in progress and will be resolved soon.`,
           request.ticketId,
           act,
-          `<strong>This request is still open and assigned to you.</strong> Nothing has been closed — `
-            + `when you are ready, use the <strong>Resolve</strong>`
+          `<strong>This request is still open and assigned to you.</strong> `
+            + `When you are ready, use the <strong>Resolve</strong>`
             + (hasNextStage ? ' or <strong>Forward</strong>' : '')
             + ` link in the original email. Those links still work.`
         )
@@ -411,7 +411,7 @@ const handleApprovalAction = async (req, res) => {
       requestStatus = 'resolved';
     } else {
       stageStatus = 'approved_forwarded';
-      requestStatus = 'in_review';
+      requestStatus = 'in_progress';
     }
 
     await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
