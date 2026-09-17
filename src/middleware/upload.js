@@ -3,6 +3,7 @@ const multerS3 = require('multer-s3');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const s3 = require('../config/s3');
+const { ALLOWED_MIME_TYPES, MAX_FILE_SIZE } = require('../config/attachments');
 
 const storage = multerS3({
   s3,
@@ -16,18 +17,9 @@ const storage = multerS3({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (req, file, cb) => {
-    const allowed = [
-      'image/jpeg', 'image/png', 'image/jpg',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-    ];
-    if (allowed.includes(file.mimetype)) return cb(null, true);
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) return cb(null, true);
     cb(new Error('File type not allowed'), false);
   },
 });

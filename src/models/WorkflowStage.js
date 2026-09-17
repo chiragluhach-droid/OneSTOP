@@ -25,6 +25,15 @@ const workflowStageSchema = new mongoose.Schema(
     handoverNote: { type: String },
     handoverFrom: { type: String },
 
+    // Files attached by the staff member when resolving, sent to the student.
+    attachments: { type: [{
+      url: { type: String, required: true },
+      publicId: { type: String },
+      originalName: { type: String },
+      mimeType: { type: String },
+      _id: false,
+    }], default: [] },
+
     // Escalation is resolved to real addresses when the stage is created, so the
     // sweeper never has to re-resolve tokens against the student's school.
     escalationRecipients: { type: [String], default: [] },

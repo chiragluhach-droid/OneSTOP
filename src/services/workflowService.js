@@ -7,6 +7,7 @@ const { buildCCInfoEmail } = require('../templates/ccInfoEmail');
 const { buildEscalationEmail } = require('../templates/escalationEmail');
 const { excludeEmail } = require('../utils/recipients');
 const { INTAKE_EMAIL } = require('../config/intake');
+const { withLinks } = require('../utils/fileLinks');
 
 const APPROVAL_EXPIRES_HOURS = parseInt(process.env.APPROVAL_TOKEN_EXPIRES_HOURS) || 72;
 
@@ -37,7 +38,7 @@ const ticketFields = ({ request, student, category, school, workflowStage }) => 
   school: school.name,
   subject: request.subject,
   description: request.description,
-  attachments: request.attachments,
+  attachments: withLinks(request.attachments),
 });
 
 /**

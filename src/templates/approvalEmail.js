@@ -18,7 +18,7 @@ const buildApprovalEmail = ({
   const attachmentLinks =
     attachments && attachments.length > 0
       ? attachments.map((a) =>
-          `<a href="${a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
+          `<a href="${a.href || a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
 
@@ -145,10 +145,6 @@ const buildApprovalEmail = ({
           <td style="padding:32px;">
             <p style="margin:0 0 16px;font-size:14px;color:#333;font-weight:700;">Take Action:</p>
             <div style="flex-wrap:wrap;">${actionButtons}</div>
-            <p style="margin:20px 0 0;font-size:12px;color:#aaa;">
-              These links expire in 72 hours and can only be used once.
-              ${inProgressUrl ? '<br><strong>In Progress</strong> tells the student you are working on it and keeps this request open — you can still Resolve' + (canForward ? ' or Forward' : '') + ' afterwards.' : ''}<br><strong>Resolve</strong> closes the request with your message to the student.${canForward ? '<br><strong>Forward</strong> passes it to the next process owner — you can add a note for them.' : ''}
-            </p>
           </td>
         </tr>
         <tr>

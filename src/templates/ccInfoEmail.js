@@ -29,7 +29,7 @@ const buildCCInfoEmail = ({
   const attachmentLinks =
     attachments && attachments.length > 0
       ? attachments.map((a) =>
-          `<a href="${a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
+          `<a href="${a.href || a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
 
@@ -51,6 +51,11 @@ const buildCCInfoEmail = ({
             <div style="margin:16px 0 0;background:${style.tint};border-left:4px solid ${accent};border-radius:6px;padding:14px 16px;">
               <p style="margin:0 0 6px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;">Remarks</p>
               <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">${event.remarks}</p>
+            </div>` : ''}
+            ${event.attachments && event.attachments.length ? `
+            <div style="margin:16px 0 0;">
+              <p style="margin:0 0 6px;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;">Files sent to the student</p>
+              ${event.attachments.map((a) => `<a href="${a.href || a.url}" target="_blank" style="display:inline-block;margin:0 12px 6px 0;color:#8B1A1A;font-size:14px;">📎 ${a.originalName || 'Attachment'}</a>`).join('')}
             </div>` : ''}
           </td>
         </tr>`

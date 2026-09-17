@@ -5,7 +5,7 @@ const APP_LINK =
   process.env.APP_DEEP_LINK ||
   `${process.env.BACKEND_URL || 'https://api.physiobook.in'}/open/track`;
 
-const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName, forwardedTo }) => {
+const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks, stageName, forwardedTo, attachments = [] }) => {
   const statusConfig = {
     pending: { color: '#e67e22', label: 'Pending Review', icon: '⏳' },
     in_review: { color: '#3498db', label: 'Under Review', icon: '🔍' },
@@ -26,6 +26,22 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
             <p style="margin:6px 0 0;font-size:12px;color:#666;">They will review your request and respond.</p>
           </td></tr>
         </table>
+       </td></tr>`
+    : '';
+
+  const attachmentsSection = attachments.length
+    ? `<tr><td style="padding:16px 32px 0;">
+        <p style="margin:0 0 8px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;">Attached files</p>
+        ${attachments.map((a) => `
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;border:1px solid #e6e6e6;border-radius:8px;">
+          <tr>
+            <td style="padding:12px 14px;font-size:14px;color:#333;word-break:break-all;">📎 ${a.originalName || 'Attachment'}</td>
+            <td align="right" style="padding:12px 14px;white-space:nowrap;">
+              <a href="${a.href || a.url}" target="_blank"
+                 style="display:inline-block;padding:7px 14px;border-radius:999px;background:#8B1A1A;color:#fff;text-decoration:none;font-size:13px;font-weight:600;">Open</a>
+            </td>
+          </tr>
+        </table>`).join('')}
        </td></tr>`
     : '';
 
@@ -67,6 +83,7 @@ const buildStudentNotificationEmail = ({ studentName, ticketId, status, remarks,
         </tr>
         ${forwardedSection}
         ${remarksSection}
+        ${attachmentsSection}
         <tr>
           <td style="padding:24px 32px 32px;" align="center">
             <table cellpadding="0" cellspacing="0" style="margin:0 auto;">

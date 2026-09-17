@@ -14,6 +14,13 @@ const approvalActionSchema = new mongoose.Schema(
     },
     remarks: { type: String },
     handoverNote: { type: String },
+    attachments: { type: [{
+      url: { type: String, required: true },
+      publicId: { type: String },
+      originalName: { type: String },
+      mimeType: { type: String },
+      _id: false,
+    }], default: [] },
     ipAddress: { type: String },
     userAgent: { type: String },
   },

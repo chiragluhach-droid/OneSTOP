@@ -30,6 +30,16 @@ const createRequest = async (req, res) => {
     if (!school) return errorResponse(res, 'School not found', 404);
 
 
+    // A client that fails to send its file part still delivers the text fields,
+    // so the request would otherwise "succeed" with the attachment silently gone.
+    // multer leaves a non-file `attachments` value in req.body in that case.
+    const attachmentDropped = req.body.attachments !== undefined && !(req.files && req.files.length);
+    if (attachmentDropped) {
+      console.warn(
+        `createRequest: attachment sent but no file received (student ${req.user._id}, content-type "${req.headers['content-type'] || ''}")`
+      );
+    }
+
     const attachments = (req.files || []).map((f) => ({
       url: f.location,
       publicId: f.key,
@@ -119,7 +129,14 @@ const createRequest = async (req, res) => {
       actor: req.user._id.toString(),
       actorModel: 'User',
       request: request._id,
-      metadata: { ticketId, category: category.name, school: school.name },
+      metadata: {
+        ticketId,
+        category: category.name,
+        school: school.name,
+        attachmentsReceived: attachments.length,
+        attachmentDropped,
+        contentType: String(req.headers['content-type'] || '').split(';')[0],
+      },
       ipAddress: req.ip,
     });
 

@@ -19,7 +19,7 @@ const buildEscalationEmail = ({
   const attachmentLinks =
     attachments && attachments.length > 0
       ? attachments.map((a) =>
-          `<a href="${a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
+          `<a href="${a.href || a.url}" style="color:#8B1A1A;margin-right:12px;" target="_blank">${a.originalName || 'Attachment'}</a>`
         ).join('')
       : '<span style="color:#888;">No attachments</span>';
 

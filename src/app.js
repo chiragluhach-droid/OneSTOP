@@ -16,6 +16,7 @@ const notificationRoutes = require('./routes/notifications');
 const adminStudentRoutes = require('./routes/adminStudents');
 const settingRoutes = require('./routes/settings');
 const openRoutes = require('./routes/open');
+const fileRoutes = require('./routes/files');
 const { startEscalationSweeper } = require('./services/escalationService');
 
 const app = express();
@@ -80,6 +81,9 @@ app.use('/api/settings', settingRoutes);
 // Public app-handoff page for email links. Not under /api: Gmail strips
 // custom-scheme hrefs, so emails link here over https and this hands off.
 app.use('/open', openRoutes);
+
+// Signed attachment downloads for email links (the S3 bucket is private).
+app.use('/files', fileRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });

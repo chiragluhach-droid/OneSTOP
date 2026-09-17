@@ -11,6 +11,10 @@ const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowServi
 const { buildStudentNotificationEmail } = require('../templates/studentNotificationEmail');
 const auditLog = require('../utils/auditLogger');
 const { isEmail } = require('../utils/recipients');
+const { getForwardDirectory } = require('../services/staffDirectory');
+const { uploadFiles, deleteFiles } = require('../services/fileStorage');
+const { withLinks } = require('../utils/fileLinks');
+const { ACCEPT_ATTR, MAX_FILES } = require('../config/attachments');
 
 // Reject was removed — a process owner closes a request with Resolve and
 // explains why in their message to the student.
@@ -38,6 +42,8 @@ const ACTION_META = {
     remarksLabel: 'Message to student',
     remarksHint: 'Explain how it was resolved — or, if it cannot be done, why. The student sees this.',
     remarksRequired: true,
+    attachLabel: 'Attach files',
+    attachHint: `Optional — up to ${MAX_FILES} files, 10 MB each (JPG, PNG, PDF, Word, Excel, text). Sent to the student with your message.`,
   },
   in_progress: {
     title: 'Mark In Progress',
@@ -56,7 +62,7 @@ const ACTION_META = {
     badge: 'Forwarding',
     intro: 'Send this request to whoever should handle it. They get the same options you have, and can forward it onwards themselves.',
     forwardToLabel: 'Forward to',
-    forwardToHint: 'Any university email address. They receive the full request with their own action links.',
+    forwardToHint: 'Pick a dean or HOD from the list, or type any university email address. They receive the full request with their own action links.',
     remarksLabel: 'Note to student',
     remarksHint: 'Optional — tell the student why it is being forwarded. The student is told who it went to.',
     remarksRequired: false,
@@ -65,7 +71,7 @@ const ACTION_META = {
   },
 };
 
-const buildFormPage = ({ act, token, ticketId, subject, description, studentName, categoryName, stageName, errorMessage, previousRemarks, previousHandover, previousForwardTo }) => {
+const buildFormPage = ({ act, token, ticketId, subject, description, studentName, categoryName, stageName, errorMessage, previousRemarks, previousHandover, previousForwardTo, directory = [] }) => {
   const meta = ACTION_META[act];
   const required = meta.remarksRequired ? '<span style="color:#c0392b;"> *</span>' : '';
 
@@ -102,6 +108,13 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
              font-family:inherit;color:#333;background:#fafafa}
     .f-input:focus{outline:none;border-color:${meta.color};background:#fff}
     .divider{margin:22px 0 18px;border-top:1px dashed #dcdcdc}
+    .f-select{appearance:auto;cursor:pointer;margin-bottom:4px}
+    .or-row{display:flex;align-items:center;gap:10px;margin:10px 0;color:#aaa;font-size:12px}
+    .or-row:before,.or-row:after{content:'';flex:1;border-top:1px solid #e6e6e6}
+    .file-drop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px;border:2px dashed #d6d6d6;border-radius:10px;background:#fafafa;cursor:pointer}
+    .file-drop input{position:absolute;width:1px;height:1px;opacity:0}
+    .file-btn{padding:9px 14px;border-radius:8px;background:#fff;border:1px solid #ddd;font-size:13px;font-weight:600;color:#333}
+    .file-names{font-size:13px;color:#666;word-break:break-word}
     .handover{margin-top:22px;padding-top:20px;border-top:1px dashed #dcdcdc}
     .err-msg{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#dc2626}
     .submit-btn{display:block;width:100%;padding:16px;background:${meta.color};color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .2s;font-family:inherit;margin-top:16px;letter-spacing:.3px}
@@ -131,14 +144,25 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
       <div class="desc-lbl">Description</div>
       <div class="desc-txt">${esc(description)}</div>
     </div>
-    <form method="POST" action="?act=${act}" class="form-section" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Submitting…';">
+    <form method="POST" action="?act=${act}" enctype="multipart/form-data" class="form-section" onsubmit="var b=this.querySelector('button[type=submit]');b.disabled=true;b.textContent='Submitting…';">
       ${errorMessage ? `<div class="err-msg">${esc(errorMessage)}</div>` : ''}
       ${meta.forwardToLabel ? `
       <div class="f-label">${esc(meta.forwardToLabel)}<span style="color:#c0392b;"> *</span></div>
       <div class="f-hint">${esc(meta.forwardToHint)}</div>
-      <input class="f-input" type="email" name="forwardTo" required
+      ${directory.length ? `
+      <select class="f-input f-select" name="forwardToPick" id="forwardToPick"
+              onchange="if(this.value){var i=document.getElementById('forwardTo');i.value=this.value;i.focus();}">
+        <option value="">Select a dean, HOD or recent contact…</option>
+        ${directory.map((g) => `
+        <optgroup label="${esc(g.label)}">
+          ${g.options.map((o) => `<option value="${esc(o.email)}"${o.email.toLowerCase() === String(previousForwardTo || '').toLowerCase() ? ' selected' : ''}>${esc(o.label === o.email ? o.email : `${o.label} — ${o.email}`)}</option>`).join('')}
+        </optgroup>`).join('')}
+      </select>
+      <div class="or-row"><span>or type an address</span></div>` : ''}
+      <input class="f-input" type="email" name="forwardTo" id="forwardTo"
              placeholder="name@mru.edu.in" value="${esc(previousForwardTo || '')}"
-             autocapitalize="off" autocorrect="off" spellcheck="false">
+             autocapitalize="off" autocorrect="off" spellcheck="false"
+             oninput="var s=document.getElementById('forwardToPick');if(s&&s.value!==this.value.trim().toLowerCase())s.value='';">
       <div class="divider"></div>` : ''}
       <div class="f-label">${esc(meta.remarksLabel)}${required}</div>
       <div class="f-hint">${esc(meta.remarksHint)}</div>
@@ -150,6 +174,17 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
         <textarea name="handoverNote" placeholder="e.g. I have verified the documents — please approve the fee waiver.">${esc(previousHandover || '')}</textarea>
       </div>` : ''}
       <input type="hidden" name="act" value="${act}">
+      ${meta.attachLabel ? `
+      <div class="handover">
+        <div class="f-label">${esc(meta.attachLabel)}</div>
+        <div class="f-hint">${esc(meta.attachHint)}</div>
+        <label class="file-drop">
+          <input type="file" name="attachments" multiple accept="${ACCEPT_ATTR}"
+                 onchange="var n=this.files.length,l=document.getElementById('fileNames');l.textContent=n?Array.prototype.map.call(this.files,function(f){return f.name;}).join(', '):'No files chosen';">
+          <span class="file-btn">📎 Choose files</span>
+          <span class="file-names" id="fileNames">No files chosen</span>
+        </label>
+      </div>` : ''}
       <button type="submit" class="submit-btn">${esc(meta.button)}</button>
     </form>
     <div class="ftr"><p>You can close this tab after submitting.</p></div>
@@ -192,6 +227,10 @@ const showApprovalForm = async (req, res) => {
       Category.findById(request.category),
     ]);
 
+    const directory = act === 'forward'
+      ? await getForwardDirectory({ exclude: [(workflowStage.recipientEmails || [])[0], student?.email] })
+      : [];
+
     return res.status(200).send(
       buildFormPage({
         act,
@@ -202,6 +241,7 @@ const showApprovalForm = async (req, res) => {
         studentName: student?.name,
         categoryName: category?.name,
         stageName: workflowStage.stageName,
+        directory,
       })
     );
   } catch (err) {
@@ -217,6 +257,9 @@ const handleApprovalAction = async (req, res) => {
   if (!VALID_ACTIONS.includes(act)) {
     return res.status(400).send(buildResultPage('error', 'Invalid action.'));
   }
+
+  let resolutionAttachments = [];
+  let attachmentsSaved = false;
 
   try {
     const approvalToken = await ApprovalToken.findOne({ token })
@@ -243,16 +286,19 @@ const handleApprovalAction = async (req, res) => {
 
     const remarks = typeof req.body.remarks === 'string' ? req.body.remarks.trim() : '';
     const handoverNote = typeof req.body.handoverNote === 'string' ? req.body.handoverNote.trim() : '';
-    const forwardTo = typeof req.body.forwardTo === 'string'
-      ? req.body.forwardTo.trim().toLowerCase()
-      : '';
+    const typed = typeof req.body.forwardTo === 'string' ? req.body.forwardTo.trim() : '';
+    const picked = typeof req.body.forwardToPick === 'string' ? req.body.forwardToPick.trim() : '';
+    const forwardTo = (typed || picked).toLowerCase();
+    const chosenFiles = act === 'resolved' ? (req.files || []) : [];
 
     const actorEmailEarly = (workflowStage.recipientEmails || [])[0] || null;
 
     // Work out what's wrong before touching the token, so a fixable mistake
     // doesn't burn a single-use link.
     let validationError = null;
-    if (ACTION_META[act].remarksRequired && !remarks) {
+    if (req.uploadError) {
+      validationError = req.uploadError;
+    } else if (ACTION_META[act].remarksRequired && !remarks) {
       validationError = `${ACTION_META[act].remarksLabel} is required.`;
     } else if (act === 'forward') {
       const studentEmail = (await User.findById(request.student).select('email').lean())?.email || '';
@@ -267,11 +313,19 @@ const handleApprovalAction = async (req, res) => {
       }
     }
 
-    if (validationError) {
+    const reshowForm = async (message) => {
       const [student, category] = await Promise.all([
         User.findById(request.student),
         Category.findById(request.category),
       ]);
+      const directory = act === 'forward'
+        ? await getForwardDirectory({ exclude: [actorEmailEarly, student?.email] })
+        : [];
+      // Browsers can't pre-fill a file input, so say so rather than silently
+      // dropping what they picked.
+      const reattach = (chosenFiles.length || req.uploadError) && act === 'resolved'
+        ? ' Please choose your files again.'
+        : '';
       return res.status(400).send(
         buildFormPage({
           act,
@@ -282,12 +336,26 @@ const handleApprovalAction = async (req, res) => {
           studentName: student?.name,
           categoryName: category?.name,
           stageName: workflowStage.stageName,
-          errorMessage: validationError,
+          errorMessage: message + (message.includes('choose your files again') ? '' : reattach),
           previousRemarks: remarks,
           previousHandover: handoverNote,
           previousForwardTo: forwardTo,
+          directory,
         })
       );
+    };
+
+    if (validationError) return reshowForm(validationError);
+
+    // Upload before consuming the link: if S3 fails the staff member can simply
+    // resubmit, instead of being left with a used link and no files sent.
+    if (chosenFiles.length) {
+      try {
+        resolutionAttachments = await uploadFiles(chosenFiles, 'onestop/resolutions');
+      } catch (err) {
+        console.error('resolution upload failed:', err.message || err);
+        return reshowForm('Your files could not be uploaded. Please try again.');
+      }
     }
 
     // Only consume the token after validation passes
@@ -418,7 +486,9 @@ const handleApprovalAction = async (req, res) => {
       status: stageStatus,
       actionTakenAt: new Date(),
       remarks: remarks || workflowStage.remarks || null,
+      ...(resolutionAttachments.length ? { attachments: resolutionAttachments } : {}),
     });
+    attachmentsSaved = true;
 
     await ApprovalAction.create({
       request: request._id,
@@ -429,6 +499,7 @@ const handleApprovalAction = async (req, res) => {
       action: stageStatus,
       remarks: remarks || null,
       handoverNote: handoverNote || null,
+      attachments: resolutionAttachments,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
@@ -499,14 +570,18 @@ const handleApprovalAction = async (req, res) => {
       category,
       school,
       excludeActor: actorEmail,
-      event: { ...EVENT_BY_ACTION[act], actorEmail, remarks, nextOwnerEmail },
+      event: { ...EVENT_BY_ACTION[act], actorEmail, remarks, nextOwnerEmail, attachments: withLinks(resolutionAttachments) },
     });
 
     const notifTitle = requestStatus === 'resolved' ? 'Request Resolved' : 'Request Forwarded';
 
     const notifBody =
       requestStatus === 'resolved'
-        ? `Your request #${request.ticketId} has been resolved.${remarks ? ' ' + remarks : ''}`
+        ? `Your request #${request.ticketId} has been resolved.${remarks ? ' ' + remarks : ''}${
+            resolutionAttachments.length
+              ? ` (${resolutionAttachments.length} file${resolutionAttachments.length > 1 ? 's' : ''} attached — see your email.)`
+              : ''
+          }`
         : `Your request #${request.ticketId} has been forwarded to ${nextOwnerEmail} for review.${remarks ? ' ' + remarks : ''}`;
 
     await Notification.create({
@@ -529,6 +604,7 @@ const handleApprovalAction = async (req, res) => {
         remarks,
         stageName: workflowStage.stageName,
         forwardedTo: nextOwnerEmail,
+        attachments: withLinks(resolutionAttachments),
       }),
     });
 
@@ -537,18 +613,24 @@ const handleApprovalAction = async (req, res) => {
       actor: workflowStage.recipientEmails[0] || 'unknown',
       actorModel: 'ProcessOwner',
       request: request._id,
-      metadata: { stageIndex: approvalToken.stageIndex, stageName: workflowStage.stageName, action: act, remarks, forwardedTo: nextOwnerEmail || undefined },
+      metadata: { stageIndex: approvalToken.stageIndex, stageName: workflowStage.stageName, action: act, remarks, forwardedTo: nextOwnerEmail || undefined, attachments: resolutionAttachments.length },
       ipAddress: req.ip,
     });
 
     const successMessage =
       act === 'resolved'
-        ? 'You have marked this request as Resolved. The student has been notified.'
+        ? `You have marked this request as Resolved. The student has been notified${
+            resolutionAttachments.length
+              ? ` and sent ${resolutionAttachments.length} file${resolutionAttachments.length > 1 ? 's' : ''}`
+              : ''
+          }.`
         : `Request forwarded to ${nextOwnerEmail}. They have been emailed, and the student has been told who it went to.`;
 
     return res.status(200).send(buildResultPage('success', successMessage, request.ticketId, act));
   } catch (err) {
     console.error('handleApprovalAction error:', err);
+    // Files uploaded for an action that never got recorded would be orphaned.
+    if (resolutionAttachments.length && !attachmentsSaved) await deleteFiles(resolutionAttachments);
     return res.status(500).send(buildResultPage('error', 'An internal error occurred. Please try again.'));
   }
 };
