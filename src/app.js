@@ -14,6 +14,7 @@ const requestRoutes = require('./routes/requests');
 const approvalRoutes = require('./routes/approvals');
 const notificationRoutes = require('./routes/notifications');
 const adminStudentRoutes = require('./routes/adminStudents');
+const adminStaffRoutes = require('./routes/adminStaff');
 const settingRoutes = require('./routes/settings');
 const openRoutes = require('./routes/open');
 const fileRoutes = require('./routes/files');
@@ -77,6 +78,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/students', adminStudentRoutes);
+app.use('/api/admin/staff', adminStaffRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/staff', staffRoutes);
 

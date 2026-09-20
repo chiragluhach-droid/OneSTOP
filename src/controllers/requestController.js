@@ -293,6 +293,32 @@ const adminDeleteDemoRequests = async (req, res) => {
   }
 };
 
+const adminGetRequestDetail = async (req, res) => {
+  try {
+    const request = await Request.findById(req.params.id)
+      .populate('student', 'name email rollNumber department')
+      .populate('category', 'name code icon')
+      .populate('school', 'name code');
+
+    if (!request) return errorResponse(res, 'Request not found', 404);
+
+    const stages = await WorkflowStage.find({ request: request._id }).sort({ stageIndex: 1 });
+
+    const { withLinks } = require('../utils/fileLinks');
+    const reqObj = request.toObject();
+    reqObj.attachments = withLinks(reqObj.attachments);
+    const stagesObj = stages.map(s => {
+      const obj = s.toObject();
+      obj.attachments = withLinks(obj.attachments);
+      return obj;
+    });
+
+    return successResponse(res, { request: reqObj, stages: stagesObj });
+  } catch (err) {
+    return errorResponse(res, 'Failed to fetch request detail', 500);
+  }
+};
+
 module.exports = {
   createRequest,
   getMyRequests,
@@ -300,4 +326,5 @@ module.exports = {
   getRequestByTicketId,
   adminGetAllRequests,
   adminDeleteDemoRequests,
+  adminGetRequestDetail,
 };

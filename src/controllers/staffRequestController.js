@@ -124,6 +124,49 @@ const getDirectory = async (req, res) => {
   }
 };
 
+const getMyHistory = async (req, res) => {
+  try {
+    const email = req.staff.email;
+    const stages = await WorkflowStage.find({
+      recipientEmails: email,
+      status: { $ne: 'pending' }
+    })
+      .populate({
+        path: 'request',
+        populate: [
+          { path: 'student', select: 'name email rollNumber' },
+          { path: 'category', select: 'name' }
+        ]
+      })
+      .sort({ updatedAt: -1 });
+
+    const historyMap = new Map();
+    
+    stages.forEach(s => {
+      if (s.request) {
+        const reqId = s.request._id.toString();
+        // Keep the most recent stage action if they were involved multiple times
+        if (!historyMap.has(reqId)) {
+          historyMap.set(reqId, {
+            ...s.request.toObject(),
+            stageStatus: s.status,
+            stageActionTakenAt: s.actionTakenAt || s.updatedAt,
+            stageRemarks: s.remarks,
+            forwardedTo: s.handoverFrom ? s.handoverFrom : null,
+          });
+        }
+      }
+    });
+
+    const history = Array.from(historyMap.values());
+
+    return successResponse(res, { history }, 'Staff history fetched successfully.');
+  } catch (err) {
+    console.error('getMyHistory error:', err);
+    return errorResponse(res, 'An internal error occurred while fetching history.', 500);
+  }
+};
+
 // Common action handler logic extracted from approvalController
 const staffAction = async (req, res) => {
   const { id } = req.params;
@@ -380,5 +423,6 @@ module.exports = {
   getAllRequests,
   getRequestDetail,
   getDirectory,
+  getMyHistory,
   staffAction,
 };
