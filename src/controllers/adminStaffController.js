@@ -1,5 +1,5 @@
 const Staff = require('../models/Staff');
-const { successResponse, errorResponse } = require('../utils/response');
+const { successResponse, errorResponse } = require('../utils/apiResponse');
 
 const getAllStaff = async (req, res) => {
   try {
