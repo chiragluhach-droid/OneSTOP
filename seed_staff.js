@@ -1,26 +1,51 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const Staff = require('./src/models/Staff');
+const School = require('./src/models/School');
 
-const createStaff = async () => {
+const seedStaffFromSchools = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log('Connected to MongoDB');
-    
-    const email = 'chiragluhach@gmail.com';
-    let staff = await Staff.findOne({ email });
-    
-    if (staff) {
-      console.log('Staff already exists!');
-    } else {
-      staff = await Staff.create({
-        name: 'Chirag (HOD Test)',
-        email: email,
-        role: 'hod',
-        isActive: true,
-      });
-      console.log('Created Staff:', staff);
+
+    const schools = await School.find();
+    let addedCount = 0;
+
+    for (const school of schools) {
+      // Add Dean
+      if (school.deanEmail) {
+        const existingDean = await Staff.findOne({ email: school.deanEmail.toLowerCase().trim() });
+        if (!existingDean) {
+          await Staff.create({
+            name: `Dean - ${school.name}`,
+            email: school.deanEmail,
+            role: 'dean',
+            designation: 'Dean',
+            isActive: true,
+          });
+          console.log(`Added Dean: ${school.deanEmail}`);
+          addedCount++;
+        }
+      }
+
+      // Add HOD
+      if (school.hodEmail) {
+        const existingHod = await Staff.findOne({ email: school.hodEmail.toLowerCase().trim() });
+        if (!existingHod) {
+          await Staff.create({
+            name: `HOD - ${school.name}`,
+            email: school.hodEmail,
+            role: 'hod',
+            designation: 'HOD',
+            isActive: true,
+          });
+          console.log(`Added HOD: ${school.hodEmail}`);
+          addedCount++;
+        }
+      }
     }
+
+    console.log(`Finished seeding. Added ${addedCount} staff members.`);
   } catch (err) {
     console.error('Error:', err);
   } finally {
@@ -29,4 +54,4 @@ const createStaff = async () => {
   }
 };
 
-createStaff();
+seedStaffFromSchools();
