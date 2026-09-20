@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
-const { protect } = require('../middleware/auth');
+const { protect, protectAny } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const {
   sendOtp, verifyOtp, refreshTokens, logout, updateProfile, getMe,
@@ -27,8 +27,8 @@ router.post('/verify-otp', [
 ], validate, verifyOtp);
 
 router.post('/refresh', refreshTokens);
-router.post('/logout', protect, logout);
-router.get('/me', protect, getMe);
-router.patch('/profile', protect, updateProfile);
+router.post('/logout', protectAny, logout);
+router.get('/me', protectAny, getMe);
+router.patch('/profile', protectAny, updateProfile);
 
 module.exports = router;
