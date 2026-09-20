@@ -221,6 +221,9 @@ const showApprovalForm = async (req, res) => {
     if (['resolved', 'rejected'].includes(request.status)) {
       return res.status(400).send(buildResultPage('error', 'This request has already been closed.'));
     }
+    if (workflowStage.status !== 'pending') {
+      return res.status(400).send(buildResultPage('error', 'This stage has already been handled (perhaps via the app).'));
+    }
 
     const [student, category] = await Promise.all([
       User.findById(request.student),
