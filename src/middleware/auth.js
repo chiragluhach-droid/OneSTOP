@@ -2,6 +2,7 @@ const { verifyAccessToken } = require('../services/jwtService');
 const { errorResponse } = require('../utils/apiResponse');
 const User = require('../models/User');
 const Admin = require('../models/Admin');
+const Staff = require('../models/Staff');
 
 const protect = async (req, res, next) => {
   try {
@@ -18,6 +19,28 @@ const protect = async (req, res, next) => {
       return errorResponse(res, 'User not found or inactive', 401);
     }
     req.user = user;
+    next();
+  } catch (err) {
+    return errorResponse(res, 'Invalid or expired token', 401);
+  }
+};
+
+const protectStaff = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return errorResponse(res, 'No token provided', 401);
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyAccessToken(token);
+    if (!['dsw', 'dean', 'hod', 'staff'].includes(decoded.role)) {
+      return errorResponse(res, 'Staff access required', 403);
+    }
+    const staff = await Staff.findById(decoded.id).select('-otp -otpExpiresAt -refreshToken');
+    if (!staff || !staff.isActive) {
+      return errorResponse(res, 'Staff not found or inactive', 401);
+    }
+    req.staff = staff;
     next();
   } catch (err) {
     return errorResponse(res, 'Invalid or expired token', 401);
@@ -46,7 +69,7 @@ const protectAdmin = async (req, res, next) => {
   }
 };
 
-// Accepts either a student token OR an admin token (for shared read routes)
+// Accepts either a student token, a staff token, OR an admin token (for shared read routes)
 const protectAny = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -60,7 +83,10 @@ const protectAny = async (req, res, next) => {
       const admin = await Admin.findById(decoded.id).select('-password -refreshToken');
       if (!admin || !admin.isActive) return errorResponse(res, 'Admin not found or inactive', 401);
       req.admin = admin;
-      req.user = null;
+    } else if (['dsw', 'dean', 'hod', 'staff'].includes(decoded.role)) {
+      const staff = await Staff.findById(decoded.id).select('-otp -otpExpiresAt -refreshToken');
+      if (!staff || !staff.isActive) return errorResponse(res, 'Staff not found or inactive', 401);
+      req.staff = staff;
     } else {
       const user = await User.findById(decoded.id)
         .select('-otp -otpExpiresAt -refreshToken')
@@ -74,4 +100,4 @@ const protectAny = async (req, res, next) => {
   }
 };
 
-module.exports = { protect, protectAdmin, protectAny };
+module.exports = { protect, protectStaff, protectAdmin, protectAny };

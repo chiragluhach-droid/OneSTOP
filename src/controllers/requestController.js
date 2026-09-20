@@ -188,13 +188,20 @@ const getRequestById = async (req, res) => {
 
     if (!request) return errorResponse(res, 'Request not found', 404);
 
-    // handoverNote is written for the next process owner only and is promised
-    // as private to them, so it never goes out on a student-facing response.
     const stages = await WorkflowStage.find({ request: request._id })
       .select('-handoverNote -handoverFrom -escalationRecipients')
       .sort({ stageIndex: 1 });
 
-    return successResponse(res, { request, stages });
+    const { withLinks } = require('../utils/fileLinks');
+    const reqObj = request.toObject();
+    reqObj.attachments = withLinks(reqObj.attachments);
+    const stagesObj = stages.map(s => {
+      const obj = s.toObject();
+      obj.attachments = withLinks(obj.attachments);
+      return obj;
+    });
+
+    return successResponse(res, { request: reqObj, stages: stagesObj });
   } catch (err) {
     return errorResponse(res, 'Failed to fetch request', 500);
   }

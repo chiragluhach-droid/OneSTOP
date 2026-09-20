@@ -17,6 +17,7 @@ const adminStudentRoutes = require('./routes/adminStudents');
 const settingRoutes = require('./routes/settings');
 const openRoutes = require('./routes/open');
 const fileRoutes = require('./routes/files');
+const staffRoutes = require('./routes/staff');
 const { startEscalationSweeper } = require('./services/escalationService');
 
 const app = express();
@@ -77,6 +78,7 @@ app.use('/api/approvals', approvalRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/students', adminStudentRoutes);
 app.use('/api/settings', settingRoutes);
+app.use('/api/staff', staffRoutes);
 
 // Public app-handoff page for email links. Not under /api: Gmail strips
 // custom-scheme hrefs, so emails link here over https and this hands off.

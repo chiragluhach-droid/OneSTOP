@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Staff = require('../models/Staff');
 const generateOtp = require('../utils/generateOtp');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../services/jwtService');
 const { sendEmail } = require('../services/emailService');
@@ -14,9 +15,15 @@ const userPayload = (user) => ({
   _id: user._id,
   name: user.name,
   email: user.email,
-  rollNumber: user.rollNumber,
-  department: user.department,
-  school: user.school ? { _id: user.school._id, name: user.school.name, code: user.school.code } : null,
+  role: user.role, // 'student', 'dsw', 'dean', 'hod', 'staff'
+  ...(user.role === 'student' && {
+    rollNumber: user.rollNumber,
+    department: user.department,
+    school: user.school ? { _id: user.school._id, name: user.school.name, code: user.school.code } : null,
+  }),
+  ...(user.role !== 'student' && {
+    designation: user.designation,
+  }),
 });
 
 const sendOtp = async (req, res) => {
@@ -26,15 +33,21 @@ const sendOtp = async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    const user = await User.findOne({ email: normalizedEmail });
+    // Check Student first, then Staff
+    let user = await User.findOne({ email: normalizedEmail });
+    let isStaff = false;
+
+    if (!user) {
+      user = await Staff.findOne({ email: normalizedEmail });
+      isStaff = !!user;
+    }
+
     if (!user) {
       return errorResponse(res, 'You are not registered in the system. Please contact admin.', 404);
     }
 
     const isDemo = normalizedEmail === DEMO_EMAIL;
 
-    // The demo account skips the resend cooldown: nothing is emailed for it, and
-    // a reviewer logging out and straight back in would otherwise be blocked.
     if (user.lastOtpSentAt && !isDemo) {
       const secondsSinceLast = (Date.now() - new Date(user.lastOtpSentAt).getTime()) / 1000;
       if (secondsSinceLast < OTP_RESEND_COOLDOWN_SECONDS) {
@@ -75,7 +88,15 @@ const verifyOtp = async (req, res) => {
     const { email, otp } = req.body;
     if (!email || !otp) return errorResponse(res, 'Email and OTP are required', 400);
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() }).populate('school', 'name code');
+    const normalizedEmail = email.toLowerCase().trim();
+    let user = await User.findOne({ email: normalizedEmail }).populate('school', 'name code');
+    let isStaff = false;
+    
+    if (!user) {
+      user = await Staff.findOne({ email: normalizedEmail });
+      isStaff = !!user;
+    }
+
     if (!user) return errorResponse(res, 'User not found', 404);
 
     if (!user.otp || !user.otpExpiresAt) {
@@ -100,16 +121,16 @@ const verifyOtp = async (req, res) => {
     user.otpExpiresAt = undefined;
     user.otpAttempts = 0;
 
-    const accessToken = signAccessToken({ id: user._id, role: 'student' });
-    const refreshToken = signRefreshToken({ id: user._id, role: 'student' });
+    const accessToken = signAccessToken({ id: user._id, role: user.role });
+    const refreshToken = signRefreshToken({ id: user._id, role: user.role });
     user.refreshToken = refreshToken;
     await user.save();
 
     await auditLog({
       event: 'USER_LOGIN',
       actor: user._id.toString(),
-      actorModel: 'User',
-      metadata: { email: user.email },
+      actorModel: isStaff ? 'Staff' : 'User',
+      metadata: { email: user.email, role: user.role },
       ipAddress: req.ip,
     });
 
@@ -130,13 +151,18 @@ const refreshTokens = async (req, res) => {
     if (!refreshToken) return errorResponse(res, 'Refresh token required', 400);
 
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.id).populate('school', 'name code');
+    
+    let user = await User.findById(decoded.id).populate('school', 'name code');
+    if (!user) {
+      user = await Staff.findById(decoded.id);
+    }
+
     if (!user || user.refreshToken !== refreshToken) {
       return errorResponse(res, 'Invalid refresh token', 401);
     }
 
-    const newAccessToken = signAccessToken({ id: user._id, role: 'student' });
-    const newRefreshToken = signRefreshToken({ id: user._id, role: 'student' });
+    const newAccessToken = signAccessToken({ id: user._id, role: user.role });
+    const newRefreshToken = signRefreshToken({ id: user._id, role: user.role });
     user.refreshToken = newRefreshToken;
     await user.save();
 
@@ -148,8 +174,11 @@ const refreshTokens = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
-    req.user.refreshToken = undefined;
-    await req.user.save();
+    const user = req.user || req.staff;
+    if (user) {
+      user.refreshToken = undefined;
+      await user.save();
+    }
     return successResponse(res, {}, 'Logged out successfully');
   } catch (err) {
     return errorResponse(res, 'Logout failed', 500);
@@ -159,7 +188,7 @@ const logout = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { name, expoPushToken } = req.body;
-    const user = req.user;
+    const user = req.user || req.staff;
 
     if (name) user.name = name.trim();
     if (expoPushToken) user.expoPushToken = expoPushToken;
@@ -172,7 +201,8 @@ const updateProfile = async (req, res) => {
 };
 
 const getMe = async (req, res) => {
-  return successResponse(res, { user: userPayload(req.user) });
+  const user = req.user || req.staff;
+  return successResponse(res, { user: userPayload(user) });
 };
 
 const buildOtpEmail = (name, otp) => `
@@ -187,7 +217,7 @@ const buildOtpEmail = (name, otp) => `
           <p style="margin:4px 0 0;color:#f5c6c6;font-size:13px;">Manav Rachna University</p>
         </td></tr>
         <tr><td style="padding:32px;">
-          <p style="margin:0;font-size:16px;color:#222;">Hi ${name || 'Student'},</p>
+          <p style="margin:0;font-size:16px;color:#222;">Hi ${name || 'User'},</p>
           <p style="margin:12px 0;font-size:14px;color:#555;">Your MR One login OTP is:</p>
           <div style="text-align:center;padding:24px;background:#fdf5f5;border-radius:8px;margin:20px 0;">
             <span style="font-size:42px;font-weight:700;color:#8B1A1A;letter-spacing:8px;">${otp}</span>
