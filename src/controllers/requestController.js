@@ -114,7 +114,7 @@ const createRequest = async (req, res) => {
       });
     }
 
-    await Request.findByIdAndUpdate(request._id, { status: 'in_review' });
+
 
     await Notification.create({
       user: req.user._id,
@@ -142,7 +142,7 @@ const createRequest = async (req, res) => {
 
     return successResponse(
       res,
-      { request: { ...request.toObject(), status: 'in_review' }, ticketId },
+      { request: request.toObject(), ticketId },
       'Request submitted successfully',
       201
     );

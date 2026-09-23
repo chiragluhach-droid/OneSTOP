@@ -21,10 +21,10 @@ router.get('/', async (req, res) => {
 
     // Strip anything that could break out of the header value.
     const safeName = name.replace(/["\r\n\\]/g, '_');
-    res.set({
+      const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+      res.set({
       'Content-Type': obj.ContentType || 'application/octet-stream',
-      // inline: images and PDFs open in the browser; other types still download.
-      'Content-Disposition': `inline; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'Content-Disposition': `${disposition}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(name)}`,
       'Cache-Control': 'private, max-age=300',
       'X-Content-Type-Options': 'nosniff',
     });

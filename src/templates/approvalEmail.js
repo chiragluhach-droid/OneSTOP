@@ -31,7 +31,7 @@ const buildApprovalEmail = ({
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#eef2ff;border-left:4px solid #1E3A8A;border-radius:6px;">
               <tr>
                 <td style="padding:16px 20px;">
-                  <p style="margin:0 0 6px;font-size:11px;color:#1E3A8A;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Note from the previous process owner</p>
+                  <p style="margin:0 0 6px;font-size:11px;color:#1E3A8A;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Note from One Stop Admin</p>
                   <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">${handoverNote}</p>
                 </td>
               </tr>
@@ -78,7 +78,7 @@ const buildApprovalEmail = ({
         ${handoverBlock}
         <tr>
           <td style="padding:20px 32px 0;">
-            <p style="margin:0;font-size:16px;color:#222;">Dear <strong>Process Owner</strong>,</p>
+            <p style="margin:0;font-size:16px;color:#222;">Dear <strong>HOD / Dean / Director</strong>,</p>
             <p style="margin:10px 0 0;font-size:14px;color:#555;">
               A student request has been routed to you for action. Please review the details and take appropriate action using the buttons below.
             </p>
