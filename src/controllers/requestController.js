@@ -9,6 +9,7 @@ const { resolveRecipients } = require('../utils/recipients');
 const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
+const { getEscalationConfig } = require('./settingController');
 
 const createRequest = async (req, res) => {
   try {
@@ -21,9 +22,10 @@ const createRequest = async (req, res) => {
       return errorResponse(res, 'Your account has no school assigned. Please contact admin.', 400);
     }
 
-    const [category, school] = await Promise.all([
+    const [category, school, globalEscalation] = await Promise.all([
       Category.findById(categoryId),
       School.findById(req.user.school._id || req.user.school),
+      getEscalationConfig(),
     ]);
 
     if (!category) return errorResponse(res, 'Category not found', 404);
@@ -58,10 +60,19 @@ const createRequest = async (req, res) => {
     // implicitly — a dean or HOD is copied only if their address was put there.
     const ccEmails = resolveRecipients(category.ccEmails, school);
 
-    const escalation = category.escalation || {};
-    const escalationRecipients = escalation.enabled
-      ? resolveRecipients(escalation.recipients, school)
-      : [];
+    // Escalation: use the global admin-configured escalation settings.
+    // Falls back to category-level settings if they exist.
+    const catEscalation = category.escalation || {};
+    let escalationRecipients = [];
+    let escalateAfterHours;
+
+    if (globalEscalation.enabled && globalEscalation.recipientEmail) {
+      escalationRecipients = [globalEscalation.recipientEmail];
+      escalateAfterHours = globalEscalation.afterHours || 24;
+    } else if (catEscalation.enabled) {
+      escalationRecipients = resolveRecipients(catEscalation.recipients, school);
+      escalateAfterHours = catEscalation.afterHours || 48;
+    }
 
     const request = await Request.create({
       ticketId,
@@ -87,7 +98,7 @@ const createRequest = async (req, res) => {
       recipientEmails: [INTAKE_EMAIL],
       ccEmails,
       escalationRecipients,
-      escalateAfterHours: escalation.enabled ? escalation.afterHours || 48 : undefined,
+      escalateAfterHours: escalateAfterHours || undefined,
       status: 'pending',
     });
 

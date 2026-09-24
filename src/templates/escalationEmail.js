@@ -1,4 +1,4 @@
-// Sent to the category's escalation contacts when a stage has gone unactioned
+// Sent to the escalation contact (e.g. VC) when a stage has gone unactioned
 // past its window. Deliberately carries no action buttons — the original
 // process owner's links are still the only way to act on the ticket.
 const buildEscalationEmail = ({
@@ -51,12 +51,23 @@ const buildEscalationEmail = ({
         <tr>
           <td style="padding:20px 32px 0;">
             <p style="margin:0;font-size:15px;color:#222;">
-              A student request has been waiting <strong>more than ${hours} hours</strong> without any action.
+              A student concern has been waiting <strong>more than ${hours} hours</strong> without any action.
             </p>
-            <p style="margin:10px 0 0;font-size:14px;color:#555;">
-              It is still pending with <strong>${pendingWith || '—'}</strong>, who was emailed on ${sentLabel}.
-              You are receiving this as the escalation contact for this category.
-            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 32px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0 0 6px;font-size:11px;color:#dc2626;text-transform:uppercase;letter-spacing:1px;font-weight:700;">⚠ Not Addressed</p>
+                  <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">
+                    This concern was <strong>not resolved</strong> by <strong>${pendingWith || '—'}</strong>,
+                    who was notified on ${sentLabel}. Despite ${hours}+ hours passing, no action was taken.
+                  </p>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
         <tr>
@@ -96,6 +107,10 @@ const buildEscalationEmail = ({
                 <td style="color:#222;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${school}</td>
               </tr>
               <tr>
+                <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Pending With</td>
+                <td style="color:#dc2626;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${pendingWith || '—'}</td>
+              </tr>
+              <tr style="background:#fafafa;">
                 <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Subject</td>
                 <td style="color:#222;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${subject}</td>
               </tr>
@@ -120,7 +135,7 @@ const buildEscalationEmail = ({
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">
               MR One — Manav Rachna University<br>
-              The action links remain with the assigned process owner.
+              This is an automated escalation. The concern was not addressed within the required timeframe.
             </p>
           </td>
         </tr>

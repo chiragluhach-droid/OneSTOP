@@ -14,6 +14,7 @@ const { withLinks } = require('../utils/fileLinks');
 const { isEmail } = require('../utils/recipients');
 const auditLog = require('../utils/auditLogger');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
+const { getEscalationConfig } = require('./settingController');
 
 // Get requests pending for this staff member
 const getMyQueue = async (req, res) => {
@@ -332,14 +333,22 @@ const staffAction = async (req, res) => {
 
     if (act === 'forward') {
       const nextStageIndex = workflowStage.stageIndex + 1;
+      const globalEsc = await getEscalationConfig();
+      const escRecipients = (globalEsc.enabled && globalEsc.recipientEmail)
+        ? [globalEsc.recipientEmail]
+        : (workflowStage.escalationRecipients || []);
+      const escHours = (globalEsc.enabled && globalEsc.recipientEmail)
+        ? (globalEsc.afterHours || 24)
+        : workflowStage.escalateAfterHours;
+
       const nextStage = await WorkflowStage.create({
         request: request._id,
         stageIndex: nextStageIndex,
         stageName: `Forwarded — ${category.name}`,
         recipientEmails: [forwardTo],
         ccEmails: workflowStage.ccEmails || [],
-        escalationRecipients: workflowStage.escalationRecipients || [],
-        escalateAfterHours: workflowStage.escalateAfterHours,
+        escalationRecipients: escRecipients,
+        escalateAfterHours: escHours,
         handoverNote: handoverNote || undefined,
         handoverFrom: handoverNote ? actorEmail : undefined,
         status: 'pending',

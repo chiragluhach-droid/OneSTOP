@@ -15,6 +15,7 @@ const { getForwardDirectory } = require('../services/staffDirectory');
 const { uploadFiles, deleteFiles } = require('../services/fileStorage');
 const { withLinks } = require('../utils/fileLinks');
 const { ACCEPT_ATTR, MAX_FILES } = require('../config/attachments');
+const { getEscalationConfig } = require('./settingController');
 
 // Reject was removed — a process owner closes a request with Resolve and
 // explains why in their message to the student.
@@ -530,6 +531,14 @@ const handleApprovalAction = async (req, res) => {
       const nextStageIndex = approvalToken.stageIndex + 1;
       nextOwnerEmail = forwardTo;
 
+      const globalEsc = await getEscalationConfig();
+      const escRecipients = (globalEsc.enabled && globalEsc.recipientEmail)
+        ? [globalEsc.recipientEmail]
+        : (workflowStage.escalationRecipients || []);
+      const escHours = (globalEsc.enabled && globalEsc.recipientEmail)
+        ? (globalEsc.afterHours || 24)
+        : workflowStage.escalateAfterHours;
+
       const nextStage = await WorkflowStage.create({
         request: request._id,
         stageIndex: nextStageIndex,
@@ -537,8 +546,8 @@ const handleApprovalAction = async (req, res) => {
         recipientEmails: [forwardTo],
         // The FYI list and escalation window follow the request down the chain.
         ccEmails: workflowStage.ccEmails || [],
-        escalationRecipients: workflowStage.escalationRecipients || [],
-        escalateAfterHours: workflowStage.escalateAfterHours,
+        escalationRecipients: escRecipients,
+        escalateAfterHours: escHours,
         handoverNote: handoverNote || undefined,
         handoverFrom: handoverNote ? actorEmail : undefined,
         status: 'pending',
