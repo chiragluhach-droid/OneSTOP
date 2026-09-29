@@ -136,7 +136,8 @@ const getMyHistory = async (req, res) => {
         path: 'request',
         populate: [
           { path: 'student', select: 'name email rollNumber' },
-          { path: 'category', select: 'name' }
+          { path: 'category', select: 'name' },
+          { path: 'school', select: 'name code' }
         ]
       })
       .sort({ updatedAt: -1 });
