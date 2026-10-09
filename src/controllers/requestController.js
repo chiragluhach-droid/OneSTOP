@@ -9,7 +9,34 @@ const { resolveRecipients } = require('../utils/recipients');
 const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
-const { getEscalationConfig } = require('./settingController');
+const { getReopenConfig } = require('./settingController');
+const { createIntakeStage } = require('../services/stageFactory');
+const { notify, notifyStaffByEmail } = require('../services/notifyService');
+const { labelForStage } = require('../services/ownerIdentity');
+const { withLinks } = require('../utils/fileLinks');
+
+// Fields a student must never be sent. handoverNote is written for the next
+// process owner and promised as private to them.
+//
+// recipientEmails is NOT excluded here: stages created before `ownerLabel`
+// existed need it to resolve a designation on the fly. The serializer below
+// strips it after doing so, so it never reaches the client either way.
+const STUDENT_STAGE_HIDDEN = '-handoverNote -handoverFrom -escalationRecipients';
+
+/**
+ * Stages as the student sees them: signed attachment links, a designation
+ * instead of a mailbox, and how long each stage took.
+ */
+const serializeStagesForStudent = async (stages) =>
+  Promise.all(
+    stages.map(async (s) => {
+      const obj = typeof s.toObject === 'function' ? s.toObject() : { ...s };
+      obj.attachments = withLinks(obj.attachments);
+      obj.ownerLabel = await labelForStage(obj);
+      delete obj.recipientEmails;
+      return obj;
+    })
+  );
 
 const createRequest = async (req, res) => {
   try {
@@ -22,10 +49,9 @@ const createRequest = async (req, res) => {
       return errorResponse(res, 'Your account has no school assigned. Please contact admin.', 400);
     }
 
-    const [category, school, globalEscalation] = await Promise.all([
+    const [category, school] = await Promise.all([
       Category.findById(categoryId),
       School.findById(req.user.school._id || req.user.school),
-      getEscalationConfig(),
     ]);
 
     if (!category) return errorResponse(res, 'Category not found', 404);
@@ -60,20 +86,6 @@ const createRequest = async (req, res) => {
     // implicitly — a dean or HOD is copied only if their address was put there.
     const ccEmails = resolveRecipients(category.ccEmails, school);
 
-    // Escalation: use the global admin-configured escalation settings.
-    // Falls back to category-level settings if they exist.
-    const catEscalation = category.escalation || {};
-    let escalationRecipients = [];
-    let escalateAfterHours;
-
-    if (globalEscalation.enabled && globalEscalation.recipientEmail) {
-      escalationRecipients = [globalEscalation.recipientEmail];
-      escalateAfterHours = globalEscalation.afterHours || 24;
-    } else if (catEscalation.enabled) {
-      escalationRecipients = resolveRecipients(catEscalation.recipients, school);
-      escalateAfterHours = catEscalation.afterHours || 48;
-    }
-
     const request = await Request.create({
       ticketId,
       student: req.user._id,
@@ -89,18 +101,10 @@ const createRequest = async (req, res) => {
       totalStages: 1,
     });
 
-    // A single intake stage. Whoever holds the request decides where it goes
-    // next by typing an address into the Forward form.
-    const intakeStage = await WorkflowStage.create({
-      request: request._id,
-      stageIndex: 0,
-      stageName: `${INTAKE_LABEL} — ${category.name}`,
-      recipientEmails: [INTAKE_EMAIL],
-      ccEmails,
-      escalationRecipients,
-      escalateAfterHours: escalateAfterHours || undefined,
-      status: 'pending',
-    });
+    // A single intake stage on the desk's short clock. Whoever holds the
+    // request decides where it goes next by typing an address into the
+    // Forward form.
+    const intakeStage = await createIntakeStage({ request, category, ccEmails });
 
     const stages = [intakeStage];
 
@@ -127,12 +131,22 @@ const createRequest = async (req, res) => {
 
 
 
-    await Notification.create({
-      user: req.user._id,
+    await notify({
+      user: req.user,
       title: 'Request Submitted',
       body: `Your request #${ticketId} has been submitted and is under initial review.`,
       type: 'request_submitted',
-      request: request._id,
+      request,
+    });
+
+    // The desk is told on its phone as well as by email, so a new concern is
+    // visible without anyone having to be at a computer.
+    await notifyStaffByEmail(INTAKE_EMAIL, {
+      title: 'New Request Received',
+      body: `#${ticketId} · ${category.name} — from ${req.user.name}. ${subject.trim()}`,
+      type: 'request_received',
+      request,
+      channelId: 'assignments',
     });
 
     await auditLog({
@@ -200,20 +214,16 @@ const getRequestById = async (req, res) => {
     if (!request) return errorResponse(res, 'Request not found', 404);
 
     const stages = await WorkflowStage.find({ request: request._id })
-      .select('-handoverNote -handoverFrom -escalationRecipients')
+      .select(STUDENT_STAGE_HIDDEN)
       .sort({ stageIndex: 1 });
 
-    const { withLinks } = require('../utils/fileLinks');
     const reqObj = request.toObject();
     reqObj.attachments = withLinks(reqObj.attachments);
-    const stagesObj = stages.map(s => {
-      const obj = s.toObject();
-      obj.attachments = withLinks(obj.attachments);
-      return obj;
-    });
+    const stagesObj = await serializeStagesForStudent(stages);
 
     return successResponse(res, { request: reqObj, stages: stagesObj });
   } catch (err) {
+    console.error('getRequestById error:', err);
     return errorResponse(res, 'Failed to fetch request', 500);
   }
 };
@@ -230,15 +240,215 @@ const getRequestByTicketId = async (req, res) => {
 
     if (!request) return errorResponse(res, 'Request not found', 404);
 
-    // handoverNote is written for the next process owner only and is promised
-    // as private to them, so it never goes out on a student-facing response.
     const stages = await WorkflowStage.find({ request: request._id })
-      .select('-handoverNote -handoverFrom -escalationRecipients')
+      .select(STUDENT_STAGE_HIDDEN)
       .sort({ stageIndex: 1 });
 
-    return successResponse(res, { request, stages });
+    const reqObj = request.toObject();
+    reqObj.attachments = withLinks(reqObj.attachments);
+
+    return successResponse(res, {
+      request: reqObj,
+      stages: await serializeStagesForStudent(stages),
+    });
   } catch (err) {
+    console.error('getRequestByTicketId error:', err);
     return errorResponse(res, 'Failed to fetch request', 500);
+  }
+};
+
+/**
+ * POST /api/requests/:id/reopen
+ *
+ * A student who isn't satisfied with how their concern was closed sends it
+ * back. The request returns to the One Stop desk on a fresh intake stage — so
+ * it restarts on the short clock and the desk decides where it goes this time,
+ * rather than bouncing straight back to whoever closed it.
+ */
+const reopenRequest = async (req, res) => {
+  try {
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 10) {
+      return errorResponse(res, 'Please describe what is still unresolved (at least 10 characters).', 400);
+    }
+    if (reason.length > 2000) {
+      return errorResponse(res, 'Please keep your reason under 2000 characters.', 400);
+    }
+
+    const policy = await getReopenConfig();
+    if (!policy.enabled) {
+      return errorResponse(res, 'Reopening requests is currently disabled. Please raise a new request.', 403);
+    }
+
+    const request = await Request.findOne({
+      _id: req.params.id,
+      student: req.user._id,
+      isDeleted: false,
+    });
+    if (!request) return errorResponse(res, 'Request not found', 404);
+
+    if (request.status !== 'resolved') {
+      return errorResponse(res, 'Only a resolved request can be reopened.', 400);
+    }
+
+    if ((request.reopenCount || 0) >= policy.maxTimes) {
+      return errorResponse(
+        res,
+        `This request has already been reopened ${policy.maxTimes} time${policy.maxTimes === 1 ? '' : 's'}. Please raise a new request.`,
+        400
+      );
+    }
+
+    const closedAt = request.resolvedAt || request.updatedAt;
+    const deadline = new Date(closedAt).getTime() + policy.withinDays * 24 * 60 * 60 * 1000;
+    if (Date.now() > deadline) {
+      return errorResponse(
+        res,
+        `This request was closed more than ${policy.withinDays} day${policy.withinDays === 1 ? '' : 's'} ago and can no longer be reopened. Please raise a new request.`,
+        400
+      );
+    }
+
+    const [category, school] = await Promise.all([
+      Category.findById(request.category),
+      School.findById(request.school),
+    ]);
+    if (!category || !school) return errorResponse(res, 'Request is missing its category or school', 400);
+
+    // Append rather than reuse: the closed stage keeps its resolution and
+    // attachments, and the timeline shows the student pushing back.
+    const lastStage = await WorkflowStage.findOne({ request: request._id }).sort({ stageIndex: -1 });
+    const nextIndex = (lastStage?.stageIndex ?? -1) + 1;
+
+    const stage = await createIntakeStage({
+      request,
+      category,
+      ccEmails: lastStage?.ccEmails || [],
+      stageIndex: nextIndex,
+      isReopen: true,
+    });
+
+    await Request.findByIdAndUpdate(request._id, {
+      $set: {
+        status: 'pending',
+        currentStageIndex: nextIndex,
+        totalStages: Math.max(request.totalStages || 1, nextIndex + 1),
+        reopenedAt: new Date(),
+        // Preserve the original turnaround — resolvedAt is about to be cleared
+        // and will be overwritten when this round closes.
+        firstResolvedAt: request.firstResolvedAt || request.resolvedAt,
+        resolvedAt: null,
+        inProgressAt: null,
+      },
+      $inc: { reopenCount: 1 },
+      $push: { reopenHistory: { reason, at: new Date() } },
+    });
+
+    // The desk reads the student's own words as the handover note, so the
+    // reason for the pushback is the first thing in the email.
+    await sendApprovalEmail({
+      request,
+      workflowStage: stage,
+      stageIndex: stage.stageIndex,
+      canForward: true,
+      student: req.user,
+      category,
+      school,
+      handoverNote:
+        `Reopened by the student (attempt ${(request.reopenCount || 0) + 1} of ${policy.maxTimes}) — they are not satisfied with the resolution.\n\n${reason}`,
+    });
+
+    await notify({
+      user: req.user,
+      title: 'Request Reopened',
+      body: `Your request #${request.ticketId} has been reopened and sent back to the ${INTAKE_LABEL}.`,
+      type: 'request_reopened',
+      request,
+    });
+
+    await notifyStaffByEmail(INTAKE_EMAIL, {
+      title: 'Request Reopened by Student',
+      body: `#${request.ticketId} — ${req.user.name} is not satisfied with the resolution. ${reason.slice(0, 140)}`,
+      type: 'request_reopened',
+      request,
+      channelId: 'assignments',
+    });
+
+    await auditLog({
+      event: 'REQUEST_REOPENED',
+      actor: req.user._id.toString(),
+      actorModel: 'User',
+      request: request._id,
+      metadata: {
+        ticketId: request.ticketId,
+        reopenCount: (request.reopenCount || 0) + 1,
+        stageIndex: nextIndex,
+      },
+      ipAddress: req.ip,
+    });
+
+    const updated = await Request.findById(request._id)
+      .populate('category', 'name code icon')
+      .populate('school', 'name code');
+
+    return successResponse(
+      res,
+      { request: updated },
+      `Request reopened and sent back to the ${INTAKE_LABEL}.`
+    );
+  } catch (err) {
+    console.error('reopenRequest error:', err);
+    return errorResponse(res, 'Failed to reopen request', 500);
+  }
+};
+
+/**
+ * GET /api/requests/:id/reopen-eligibility
+ * Lets the app show or hide the Reopen button, and say why when it is hidden,
+ * without the student having to try and be refused.
+ */
+const getReopenEligibility = async (req, res) => {
+  try {
+    const [request, policy] = await Promise.all([
+      Request.findOne({ _id: req.params.id, student: req.user._id, isDeleted: false })
+        .select('status resolvedAt updatedAt reopenCount'),
+      getReopenConfig(),
+    ]);
+    if (!request) return errorResponse(res, 'Request not found', 404);
+
+    const used = request.reopenCount || 0;
+    const closedAt = request.resolvedAt || request.updatedAt;
+    const deadline = closedAt
+      ? new Date(new Date(closedAt).getTime() + policy.withinDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    let canReopen = true;
+    let reason = null;
+
+    if (!policy.enabled) {
+      canReopen = false;
+      reason = 'Reopening is currently disabled.';
+    } else if (request.status !== 'resolved') {
+      canReopen = false;
+      reason = 'This request is still open.';
+    } else if (used >= policy.maxTimes) {
+      canReopen = false;
+      reason = `You have already reopened this ${policy.maxTimes} time${policy.maxTimes === 1 ? '' : 's'}.`;
+    } else if (deadline && Date.now() > deadline.getTime()) {
+      canReopen = false;
+      reason = `The ${policy.withinDays}-day window to reopen has passed.`;
+    }
+
+    return successResponse(res, {
+      canReopen,
+      reason,
+      reopensUsed: used,
+      reopensAllowed: policy.maxTimes,
+      withinDays: policy.withinDays,
+      deadline,
+    });
+  } catch (err) {
+    return errorResponse(res, 'Failed to check reopen eligibility', 500);
   }
 };
 
@@ -335,6 +545,8 @@ module.exports = {
   getMyRequests,
   getRequestById,
   getRequestByTicketId,
+  reopenRequest,
+  getReopenEligibility,
   adminGetAllRequests,
   adminDeleteDemoRequests,
   adminGetRequestDetail,

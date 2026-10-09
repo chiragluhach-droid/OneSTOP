@@ -1,6 +1,8 @@
-// Sent to the escalation contact (e.g. VC) when a stage has gone unactioned
-// past its window. Deliberately carries no action buttons — the original
-// process owner's links are still the only way to act on the ticket.
+// Sent to the escalation contact when a stage has gone unactioned past its
+// window. It carries no Resolve / Forward buttons — only the stage owner can
+// close a ticket. What it does carry is a way to put pressure on them: a
+// message box with Reply (back to the One Stop desk) and Forward (on to
+// whoever is sitting on it, One Stop copied).
 const buildEscalationEmail = ({
   stageName,
   studentName,
@@ -14,7 +16,10 @@ const buildEscalationEmail = ({
   attachments,
   hours,
   pendingWith,
+  pendingWithLabel,
   sentAt,
+  respondUrl,
+  forwardTargetLabel,
 }) => {
   const attachmentLinks =
     attachments && attachments.length > 0
@@ -26,6 +31,34 @@ const buildEscalationEmail = ({
   const sentLabel = sentAt
     ? new Date(sentAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
     : '—';
+
+  const who = pendingWithLabel
+    ? `${pendingWithLabel} (${pendingWith || '—'})`
+    : (pendingWith || '—');
+
+  const actionBlock = respondUrl
+    ? `
+        <tr>
+          <td style="padding:24px 32px 0;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+              <tr>
+                <td style="padding:20px;">
+                  <p style="margin:0 0 6px;font-size:14px;color:#1e293b;font-weight:700;">Send a message about this</p>
+                  <p style="margin:0 0 16px;font-size:13px;color:#64748b;line-height:1.6;">
+                    Open the form to write your message, then choose how to send it:
+                    <strong>Reply</strong> goes back to the One Stop desk, and
+                    <strong>Forward</strong> sends it to ${forwardTargetLabel || 'the desk holding this request'}.
+                  </p>
+                  <a href="${respondUrl}"
+                     style="display:inline-block;padding:13px 26px;background:#8B1A1A;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;">
+                    ✉ Write a message
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>`
+    : '';
 
   return `
 <!DOCTYPE html>
@@ -51,7 +84,7 @@ const buildEscalationEmail = ({
         <tr>
           <td style="padding:20px 32px 0;">
             <p style="margin:0;font-size:15px;color:#222;">
-              A student concern has been waiting <strong>more than ${hours} hours</strong> without any action.
+              A student concern has been waiting <strong>more than ${hours} hour${hours === 1 ? '' : 's'}</strong> without any action.
             </p>
           </td>
         </tr>
@@ -62,8 +95,8 @@ const buildEscalationEmail = ({
                 <td style="padding:16px 20px;">
                   <p style="margin:0 0 6px;font-size:11px;color:#dc2626;text-transform:uppercase;letter-spacing:1px;font-weight:700;">⚠ Not Addressed</p>
                   <p style="margin:0;font-size:14px;color:#333;line-height:1.6;">
-                    This concern was <strong>not resolved</strong> by <strong>${pendingWith || '—'}</strong>,
-                    who was notified on ${sentLabel}. Despite ${hours}+ hours passing, no action was taken.
+                    This concern has <strong>not been resolved</strong> by <strong>${who}</strong>,
+                    who was notified on ${sentLabel}. Despite ${hours}+ hour${hours === 1 ? '' : 's'} passing, no action has been taken.
                   </p>
                 </td>
               </tr>
@@ -108,7 +141,7 @@ const buildEscalationEmail = ({
               </tr>
               <tr>
                 <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Pending With</td>
-                <td style="color:#dc2626;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${pendingWith || '—'}</td>
+                <td style="color:#dc2626;font-size:13px;font-weight:600;border-bottom:1px solid #eee;padding:10px 12px;">${who}</td>
               </tr>
               <tr style="background:#fafafa;">
                 <td style="color:#888;font-size:13px;border-bottom:1px solid #eee;padding:10px 12px;">Subject</td>
@@ -126,11 +159,13 @@ const buildEscalationEmail = ({
           </td>
         </tr>
         <tr>
-          <td style="padding:16px 32px 24px;">
+          <td style="padding:16px 32px 0;">
             <p style="margin:0 0 8px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:1px;">Attachments</p>
             <div style="font-size:13px;">${attachmentLinks}</div>
           </td>
         </tr>
+        ${actionBlock}
+        <tr><td style="padding:0 0 24px;"></td></tr>
         <tr>
           <td style="background:#f8f8f8;padding:20px 32px;border-top:1px solid #eee;">
             <p style="margin:0;font-size:12px;color:#aaa;text-align:center;">

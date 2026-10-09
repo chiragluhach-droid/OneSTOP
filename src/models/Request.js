@@ -27,6 +27,25 @@ const requestSchema = new mongoose.Schema(
     resolvedAt: { type: Date },
     rejectedAt: { type: Date },
     rejectionReason: { type: String },
+
+    // ── Reopen ──
+    // A student who isn't satisfied with how their concern was closed can send
+    // it back. The request returns to the One Stop desk on a fresh stage; these
+    // fields are what the reopen policy is enforced against.
+    reopenCount: { type: Number, default: 0 },
+    reopenedAt: { type: Date },
+    // The first time this was closed. `resolvedAt` moves with each new
+    // resolution, so the original turnaround would otherwise be lost.
+    firstResolvedAt: { type: Date },
+    reopenHistory: {
+      type: [{
+        reason: { type: String, required: true },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      }],
+      default: [],
+    },
+
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }

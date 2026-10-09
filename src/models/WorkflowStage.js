@@ -7,6 +7,14 @@ const workflowStageSchema = new mongoose.Schema(
     stageName: { type: String, required: true },
     recipientEmails: { type: [String], required: true },
     ccEmails: { type: [String], default: [] },
+
+    // Which clock this stage runs on, and how the request reads to the student
+    // while it sits here. See config/sla.js.
+    stageKind: { type: String, enum: ['intake', 'forwarded'], default: 'forwarded' },
+
+    // Designation of whoever holds this stage ("Dean — School of Law"). The
+    // student-facing API sends this instead of recipientEmails.
+    ownerLabel: { type: String },
     status: {
       type: String,
       enum: ['pending', 'approved_forwarded', 'approved_final', 'rejected'],
@@ -39,6 +47,15 @@ const workflowStageSchema = new mongoose.Schema(
     escalationRecipients: { type: [String], default: [] },
     escalateAfterHours: { type: Number },
     escalatedAt: { type: Date },
+
+    // Set when the escalation contact replies or pushes the stage back. Shown
+    // on the stage so the next person to open the ticket sees the nudge.
+    escalationResponseAt: { type: Date },
+    escalationResponseCount: { type: Number, default: 0 },
+
+    // Set when a student reopens a request: the new stage that carries their
+    // follow-up, so the app can label it "Reopened" rather than "Forwarded".
+    isReopen: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

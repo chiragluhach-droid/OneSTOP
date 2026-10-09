@@ -4,7 +4,6 @@ const WorkflowStage = require('../models/WorkflowStage');
 const Request = require('../models/Request');
 const Category = require('../models/Category');
 const School = require('../models/School');
-const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { sendEmail } = require('../services/emailService');
 const { sendApprovalEmail, sendCcFyiEmail } = require('../services/workflowService');
@@ -15,7 +14,10 @@ const { getForwardDirectory } = require('../services/staffDirectory');
 const { uploadFiles, deleteFiles } = require('../services/fileStorage');
 const { withLinks } = require('../utils/fileLinks');
 const { ACCEPT_ATTR, MAX_FILES } = require('../config/attachments');
-const { getEscalationConfig } = require('./settingController');
+const { nextRequestStatus } = require('../config/sla');
+const { createForwardStage } = require('../services/stageFactory');
+const { notify, notifyStaffByEmail } = require('../services/notifyService');
+const { escapeHtml: esc } = require('../utils/htmlEscape');
 
 // Reject was removed — a process owner closes a request with Resolve and
 // explains why in their message to the student.
@@ -24,14 +26,6 @@ const VALID_ACTIONS = ['forward', 'resolved', 'in_progress'];
 // 'in_progress' is an acknowledgement, not an outcome: it reassures the student
 // and leaves the stage open so Resolve / Forward still work afterwards.
 const ACKNOWLEDGEMENT_ACTIONS = ['in_progress'];
-
-const esc = (v) =>
-  String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 
 const ACTION_META = {
   resolved: {
@@ -63,7 +57,7 @@ const ACTION_META = {
     badge: 'Forwarding',
     intro: 'Send this request to whoever should handle it. They get the same options you have, and can forward it onwards themselves.',
     forwardToLabel: 'Forward to',
-    forwardToHint: 'Pick a dean or HOD from the list, or type any university email address. They receive the full request with their own action links.',
+    forwardToHint: 'Pick anyone from the staff list, or type any university email address. They receive the full request with their own action links.',
     remarksLabel: 'Note to student',
     remarksHint: 'Optional — tell the student why it is being forwarded. The student is told who it went to.',
     remarksRequired: false,
@@ -153,7 +147,7 @@ const buildFormPage = ({ act, token, ticketId, subject, description, studentName
       ${directory.length ? `
       <select class="f-input f-select" name="forwardToPick" id="forwardToPick"
               onchange="if(this.value){var i=document.getElementById('forwardTo');i.value=this.value;i.focus();}">
-        <option value="">Select a dean, HOD or recent contact…</option>
+        <option value="">Select a dean, HOD, director or recent contact…</option>
         ${directory.map((g) => `
         <optgroup label="${esc(g.label)}">
           ${g.options.map((o) => `<option value="${esc(o.email)}"${o.email.toLowerCase() === String(previousForwardTo || '').toLowerCase() ? ' selected' : ''}>${esc(o.label === o.email ? o.email : `${o.label} — ${o.email}`)}</option>`).join('')}
@@ -203,7 +197,14 @@ const showApprovalForm = async (req, res) => {
   }
 
   try {
-    const approvalToken = await ApprovalToken.findOne({ token })
+    // Excludes escalation tokens, which are minted in the same format but
+    // must only ever drive the Reply / Forward form — they are reusable and
+    // held by someone who is not the stage owner.
+    //
+    // `$ne` rather than `purpose: 'action'`: tokens created before this field
+    // existed have no `purpose` at all, and a positive match would invalidate
+    // every action link already sitting in someone's inbox.
+    const approvalToken = await ApprovalToken.findOne({ token, purpose: { $ne: 'escalation' } })
       .populate('request')
       .populate('workflowStage');
 
@@ -266,7 +267,14 @@ const handleApprovalAction = async (req, res) => {
   let attachmentsSaved = false;
 
   try {
-    const approvalToken = await ApprovalToken.findOne({ token })
+    // Excludes escalation tokens, which are minted in the same format but
+    // must only ever drive the Reply / Forward form — they are reusable and
+    // held by someone who is not the stage owner.
+    //
+    // `$ne` rather than `purpose: 'action'`: tokens created before this field
+    // existed have no `purpose` at all, and a positive match would invalidate
+    // every action link already sitting in someone's inbox.
+    const approvalToken = await ApprovalToken.findOne({ token, purpose: { $ne: 'escalation' } })
       .populate('request')
       .populate('workflowStage');
 
@@ -380,6 +388,10 @@ const handleApprovalAction = async (req, res) => {
       }
 
       const now = new Date();
+      // What the student is told: the desk picking it up is "In Progress",
+      // a dean or HOD picking it up is "Under Review".
+      const ackStatus = nextRequestStatus({ stageKind: workflowStage.stageKind, act: 'in_progress' });
+      const ackLabel = ackStatus === 'in_review' ? 'Under Review' : 'In Progress';
 
       // Saved to `remarks` rather than a dedicated field: every mobile build ever
       // shipped renders stage.remarks on the timeline, whereas a new field would
@@ -391,8 +403,10 @@ const handleApprovalAction = async (req, res) => {
           ? `In progress — ${remarks}`
           : 'In progress — being worked on, will be resolved soon.',
       });
+      // The desk acknowledging it reads as "in progress"; a dean or HOD
+      // acknowledging it reads as "in review". See config/sla.js.
       await Request.findByIdAndUpdate(request._id, {
-        status: 'in_progress',
+        status: ackStatus,
         inProgressAt: now,
       });
 
@@ -416,21 +430,21 @@ const handleApprovalAction = async (req, res) => {
         userAgent: req.headers['user-agent'],
       });
 
-      await Notification.create({
-        user: student._id,
-        title: 'Request In Progress',
+      await notify({
+        user: student,
+        title: `Request ${ackLabel}`,
         body: `Your request #${request.ticketId} is being worked on and will be resolved soon.${remarks ? ' ' + remarks : ''}`,
-        type: 'request_in_progress',
-        request: request._id,
+        type: ackStatus === 'in_review' ? 'request_in_review' : 'request_in_progress',
+        request,
       });
 
       await sendEmail({
         to: student.email,
-        subject: `[MR One] Your request #${request.ticketId} — In Progress`,
+        subject: `[MR One] Your request #${request.ticketId} — ${ackLabel}`,
         htmlContent: buildStudentNotificationEmail({
           studentName: student.name,
           ticketId: request.ticketId,
-          status: 'in_progress',
+          status: ackStatus,
           remarks,
           stageName: workflowStage.stageName,
         }),
@@ -475,16 +489,8 @@ const handleApprovalAction = async (req, res) => {
         )
       );
     }
-    let stageStatus;
-    let requestStatus;
-
-    if (act === 'resolved') {
-      stageStatus = 'approved_final';
-      requestStatus = 'resolved';
-    } else {
-      stageStatus = 'approved_forwarded';
-      requestStatus = 'in_progress';
-    }
+    const stageStatus = act === 'resolved' ? 'approved_final' : 'approved_forwarded';
+    const requestStatus = nextRequestStatus({ stageKind: workflowStage.stageKind, act });
 
     await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
       status: stageStatus,
@@ -528,33 +534,15 @@ const handleApprovalAction = async (req, res) => {
     // currently holding the request, and they can forward onwards in turn.
     let nextOwnerEmail = null;
     if (act === 'forward') {
-      const nextStageIndex = approvalToken.stageIndex + 1;
       nextOwnerEmail = forwardTo;
 
-      const globalEsc = await getEscalationConfig();
-      const escRecipients = (globalEsc.enabled && globalEsc.recipientEmail)
-        ? [globalEsc.recipientEmail]
-        : (workflowStage.escalationRecipients || []);
-      const escHours = (globalEsc.enabled && globalEsc.recipientEmail)
-        ? (globalEsc.afterHours || 24)
-        : workflowStage.escalateAfterHours;
-
-      const nextStage = await WorkflowStage.create({
-        request: request._id,
-        stageIndex: nextStageIndex,
-        stageName: `Forwarded — ${category.name}`,
-        recipientEmails: [forwardTo],
-        // The FYI list and escalation window follow the request down the chain.
-        ccEmails: workflowStage.ccEmails || [],
-        escalationRecipients: escRecipients,
-        escalateAfterHours: escHours,
-        handoverNote: handoverNote || undefined,
-        handoverFrom: handoverNote ? actorEmail : undefined,
-        status: 'pending',
-      });
-
-      await Request.findByIdAndUpdate(request._id, {
-        totalStages: Math.max(request.totalStages || 1, nextStageIndex + 1),
+      const nextStage = await createForwardStage({
+        request,
+        fromStage: workflowStage,
+        forwardTo,
+        handoverNote,
+        actorEmail,
+        category,
       });
 
       await sendApprovalEmail({
@@ -596,13 +584,26 @@ const handleApprovalAction = async (req, res) => {
           }`
         : `Your request #${request.ticketId} has been forwarded to ${nextOwnerEmail} for review.${remarks ? ' ' + remarks : ''}`;
 
-    await Notification.create({
-      user: student._id,
+    await notify({
+      user: student,
       title: notifTitle,
       body: notifBody,
       type: requestStatus === 'resolved' ? 'request_resolved' : 'stage_approved',
-      request: request._id,
+      request,
     });
+
+    // Whoever it was just handed to. Not every forward target has a staff
+    // account — those people are reached by email only, which notifyStaffByEmail
+    // reports without treating it as a failure.
+    if (nextOwnerEmail) {
+      await notifyStaffByEmail(nextOwnerEmail, {
+        title: 'Request Forwarded to You',
+        body: `#${request.ticketId} · ${category.name} — from ${student.name}. ${request.subject}`,
+        type: 'request_assigned',
+        request,
+        channelId: 'assignments',
+      });
+    }
 
     const studentEmailStatus = requestStatus === 'resolved' ? 'resolved' : 'approved_forwarded';
     await sendEmail({

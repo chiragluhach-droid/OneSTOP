@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Staff = require('../models/Staff');
+const { unregisterToken } = require('../services/pushService');
 const generateOtp = require('../utils/generateOtp');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../services/jwtService');
 const { sendEmail } = require('../services/emailService');
@@ -179,6 +180,20 @@ const logout = async (req, res) => {
       user.refreshToken = undefined;
       await user.save();
     }
+
+    // Detach this device's push token on the way out. The app also calls
+    // /notifications/unregister-token, but doing it here too means a sign-out
+    // that happens while offline, or an app that is killed mid-logout, still
+    // can't leave this account's updates arriving on a device someone else
+    // signs in to next.
+    if (req.body?.pushToken) {
+      try {
+        await unregisterToken(req.body.pushToken);
+      } catch (err) {
+        console.warn('logout: push token cleanup failed:', err.message || err);
+      }
+    }
+
     return successResponse(res, {}, 'Logged out successfully');
   } catch (err) {
     return errorResponse(res, 'Logout failed', 500);

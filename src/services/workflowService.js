@@ -8,13 +8,22 @@ const { buildEscalationEmail } = require('../templates/escalationEmail');
 const { excludeEmail } = require('../utils/recipients');
 const { INTAKE_EMAIL } = require('../config/intake');
 const { withLinks } = require('../utils/fileLinks');
+const { labelForStage } = require('./ownerIdentity');
 
 const APPROVAL_EXPIRES_HOURS = parseInt(process.env.APPROVAL_TOKEN_EXPIRES_HOURS) || 72;
 
+// The escalation response form stays open longer than an action link, and can
+// be used more than once — see the comment on ApprovalToken.purpose.
+const ESCALATION_RESPONSE_EXPIRES_HOURS = parseInt(process.env.ESCALATION_RESPONSE_EXPIRES_HOURS) || 336;
+const ESCALATION_RESPONSE_MAX_USES = parseInt(process.env.ESCALATION_RESPONSE_MAX_USES) || 10;
+
 const generateToken = () => crypto.randomBytes(48).toString('hex');
 
-const createApprovalToken = async ({ request, workflowStage, stageIndex }) => {
-  const expiresAt = new Date(Date.now() + APPROVAL_EXPIRES_HOURS * 60 * 60 * 1000);
+const createApprovalToken = async ({
+  request, workflowStage, stageIndex,
+  purpose = 'action', maxUses = 1, expiresHours = APPROVAL_EXPIRES_HOURS,
+}) => {
+  const expiresAt = new Date(Date.now() + expiresHours * 60 * 60 * 1000);
   const token = generateToken();
   await ApprovalToken.create({
     token,
@@ -22,6 +31,8 @@ const createApprovalToken = async ({ request, workflowStage, stageIndex }) => {
     workflowStage: workflowStage._id,
     stageIndex,
     isFinalStage: false,
+    purpose,
+    maxUses,
     expiresAt,
   });
   return token;
@@ -127,6 +138,28 @@ const sendEscalationEmail = async ({ request, workflowStage, student, category, 
   );
   if (recipients.length === 0) return false;
 
+  const ownerEmail = (workflowStage.recipientEmails || [])[0];
+  const ownerLabel = await labelForStage(workflowStage);
+
+  // A longer life than an action link: an escalation is read by someone senior
+  // who may not open their inbox for a day or two, and the window the stage
+  // already blew through is the shorter of the two clocks.
+  const respondToken = await createApprovalToken({
+    request,
+    workflowStage,
+    stageIndex: workflowStage.stageIndex,
+    purpose: 'escalation',
+    maxUses: ESCALATION_RESPONSE_MAX_USES,
+    expiresHours: ESCALATION_RESPONSE_EXPIRES_HOURS,
+  });
+
+  // Forward goes to whoever is named in the message. When the desk itself is
+  // the one sitting on it, there is nobody further down the chain yet, so both
+  // buttons land back on the desk.
+  const isIntakeStage =
+    workflowStage.stageKind === 'intake'
+    || String(ownerEmail || '').toLowerCase() === INTAKE_EMAIL;
+
   await sendEmail({
     to: recipients,
     subject: `[MR One] Overdue ${hours}h — Ticket #${request.ticketId} awaiting action`,
@@ -134,7 +167,12 @@ const sendEscalationEmail = async ({ request, workflowStage, student, category, 
       ...ticketFields({ request, student, category, school, workflowStage }),
       hours,
       pendingWith: (workflowStage.recipientEmails || []).join(', '),
+      pendingWithLabel: ownerLabel,
       sentAt: workflowStage.emailSentAt,
+      respondUrl: `${process.env.BACKEND_URL}/api/escalations/${respondToken}/respond`,
+      forwardTargetLabel: isIntakeStage
+        ? 'the One Stop desk'
+        : `${ownerLabel} (${ownerEmail})`,
     }),
   });
 

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const pushTokenSchema = require('./pushTokenSchema');
 
 const userSchema = new mongoose.Schema(
   {
@@ -9,7 +10,10 @@ const userSchema = new mongoose.Schema(
     department:    { type: String, trim: true },
     role:          { type: String, enum: ['student'], default: 'student' },
     isActive:      { type: Boolean, default: true },
+    // `expoPushToken` is the original single-device field, kept so older app
+    // builds that PATCH it keep working. `pushTokens` is what the sender reads.
     expoPushToken: { type: String },
+    pushTokens: { type: [pushTokenSchema], default: [] },
     otp:           { type: String },
     otpExpiresAt:  { type: Date },
     otpAttempts:   { type: Number, default: 0 },

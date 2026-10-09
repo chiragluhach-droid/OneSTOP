@@ -1,7 +1,6 @@
 const Request = require('../models/Request');
 const WorkflowStage = require('../models/WorkflowStage');
 const ApprovalAction = require('../models/ApprovalAction');
-const Notification = require('../models/Notification');
 const User = require('../models/User');
 const Category = require('../models/Category');
 const School = require('../models/School');
@@ -14,7 +13,9 @@ const { withLinks } = require('../utils/fileLinks');
 const { isEmail } = require('../utils/recipients');
 const auditLog = require('../utils/auditLogger');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
-const { getEscalationConfig } = require('./settingController');
+const { nextRequestStatus } = require('../config/sla');
+const { createForwardStage } = require('../services/stageFactory');
+const { notify, notifyStaffByEmail } = require('../services/notifyService');
 
 // Get requests pending for this staff member
 const getMyQueue = async (req, res) => {
@@ -241,12 +242,18 @@ const staffAction = async (req, res) => {
       }
       
       const now = new Date();
+      // What the student is told: the desk picking it up is "In Progress",
+      // a dean or HOD picking it up is "Under Review".
+      const ackStatus = nextRequestStatus({ stageKind: workflowStage.stageKind, act: 'in_progress' });
+      const ackLabel = ackStatus === 'in_review' ? 'Under Review' : 'In Progress';
       await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
         inProgressAt: now,
         remarks: remarks ? `In progress — ${remarks}` : 'In progress — being worked on, will be resolved soon.',
       });
+      // The desk acknowledging it reads as "in progress"; a dean or HOD
+      // acknowledging it reads as "in review". See config/sla.js.
       await Request.findByIdAndUpdate(request._id, {
-        status: 'in_progress',
+        status: ackStatus,
         inProgressAt: now,
       });
 
@@ -262,21 +269,21 @@ const staffAction = async (req, res) => {
         userAgent: req.headers['user-agent'],
       });
 
-      await Notification.create({
-        user: student._id,
-        title: 'Request In Progress',
+      await notify({
+        user: student,
+        title: `Request ${ackLabel}`,
         body: `Your request #${request.ticketId} is being worked on and will be resolved soon.${remarks ? ' ' + remarks : ''}`,
-        type: 'request_in_progress',
-        request: request._id,
+        type: ackStatus === 'in_review' ? 'request_in_review' : 'request_in_progress',
+        request,
       });
 
       await sendEmail({
         to: student.email,
-        subject: `[MR One] Your request #${request.ticketId} — In Progress`,
+        subject: `[MR One] Your request #${request.ticketId} — ${ackLabel}`,
         htmlContent: buildStudentNotificationEmail({
           studentName: student.name,
           ticketId: request.ticketId,
-          status: 'in_progress',
+          status: ackStatus,
           remarks,
           stageName: workflowStage.stageName,
         }),
@@ -301,7 +308,7 @@ const staffAction = async (req, res) => {
 
     // RESOLVE OR FORWARD
     const stageStatus = act === 'resolved' ? 'approved_final' : 'approved_forwarded';
-    const requestStatus = act === 'resolved' ? 'resolved' : 'in_progress';
+    const requestStatus = nextRequestStatus({ stageKind: workflowStage.stageKind, act });
 
     await WorkflowStage.findByIdAndUpdate(workflowStage._id, {
       status: stageStatus,
@@ -333,30 +340,13 @@ const staffAction = async (req, res) => {
     await Request.findByIdAndUpdate(request._id, updateData);
 
     if (act === 'forward') {
-      const nextStageIndex = workflowStage.stageIndex + 1;
-      const globalEsc = await getEscalationConfig();
-      const escRecipients = (globalEsc.enabled && globalEsc.recipientEmail)
-        ? [globalEsc.recipientEmail]
-        : (workflowStage.escalationRecipients || []);
-      const escHours = (globalEsc.enabled && globalEsc.recipientEmail)
-        ? (globalEsc.afterHours || 24)
-        : workflowStage.escalateAfterHours;
-
-      const nextStage = await WorkflowStage.create({
-        request: request._id,
-        stageIndex: nextStageIndex,
-        stageName: `Forwarded — ${category.name}`,
-        recipientEmails: [forwardTo],
-        ccEmails: workflowStage.ccEmails || [],
-        escalationRecipients: escRecipients,
-        escalateAfterHours: escHours,
-        handoverNote: handoverNote || undefined,
-        handoverFrom: handoverNote ? actorEmail : undefined,
-        status: 'pending',
-      });
-
-      await Request.findByIdAndUpdate(request._id, {
-        totalStages: Math.max(request.totalStages || 1, nextStageIndex + 1),
+      const nextStage = await createForwardStage({
+        request,
+        fromStage: workflowStage,
+        forwardTo,
+        handoverNote,
+        actorEmail,
+        category,
       });
 
       // Still send the email with single-use tokens just in case the next person relies on email!
@@ -387,13 +377,23 @@ const staffAction = async (req, res) => {
       ? `Your request #${request.ticketId} has been resolved.${remarks ? ' ' + remarks : ''}`
       : `Your request #${request.ticketId} has been forwarded to ${nextOwnerEmail} for review.${remarks ? ' ' + remarks : ''}`;
 
-    await Notification.create({
-      user: student._id,
+    await notify({
+      user: student,
       title: notifTitle,
       body: notifBody,
       type: requestStatus === 'resolved' ? 'request_resolved' : 'stage_approved',
-      request: request._id,
+      request,
     });
+
+    if (nextOwnerEmail) {
+      await notifyStaffByEmail(nextOwnerEmail, {
+        title: 'Request Forwarded to You',
+        body: `#${request.ticketId} · ${category.name} — from ${student.name}. ${request.subject}`,
+        type: 'request_assigned',
+        request,
+        channelId: 'assignments',
+      });
+    }
 
     const studentEmailStatus = requestStatus === 'resolved' ? 'resolved' : 'approved_forwarded';
     await sendEmail({
