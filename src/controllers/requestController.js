@@ -483,33 +483,55 @@ const adminGetAllRequests = async (req, res) => {
   }
 };
 
+/**
+ * Wipe everything the App Store / Play Store review account has raised, so the
+ * next reviewer opens a clean app.
+ *
+ * Deletes by request id rather than by student, so the staff-side notifications
+ * about those requests go too — otherwise the One Stop desk is left with alerts
+ * that open a ticket which no longer exists.
+ */
 const adminDeleteDemoRequests = async (req, res) => {
   try {
     const DEMO_EMAIL = 'demo@onestop.mru.edu.in';
     const User = require('../models/User');
     const WorkflowStage = require('../models/WorkflowStage');
     const ApprovalToken = require('../models/ApprovalToken');
+    const ApprovalAction = require('../models/ApprovalAction');
+    const EscalationResponse = require('../models/EscalationResponse');
     const Notification = require('../models/Notification');
     const AuditLog = require('../models/AuditLog');
 
     const demo = await User.findOne({ email: DEMO_EMAIL });
     if (!demo) return errorResponse(res, 'Demo user not found', 404);
 
-    const requests = await Request.find({ student: demo._id });
-    const requestIds = requests.map(r => r._id);
+    const requests = await Request.find({ student: demo._id }).select('_id');
+    const requestIds = requests.map((r) => r._id);
 
     if (requestIds.length > 0) {
       await Promise.all([
         WorkflowStage.deleteMany({ request: { $in: requestIds } }),
         ApprovalToken.deleteMany({ request: { $in: requestIds } }),
+        // These two were missing, so a reset left orphaned action and
+        // escalation history behind.
+        ApprovalAction.deleteMany({ request: { $in: requestIds } }),
+        EscalationResponse.deleteMany({ request: { $in: requestIds } }),
         Notification.deleteMany({ request: { $in: requestIds } }),
         AuditLog.deleteMany({ request: { $in: requestIds } }),
         Request.deleteMany({ student: demo._id }),
       ]);
     }
 
-    return successResponse(res, { deleted: requestIds.length });
+    // Anything else sitting in the reviewer's bell — a broadcast, say — would
+    // otherwise survive a "reset" and show up as unread on a fresh install.
+    const strayNotifications = await Notification.deleteMany({ user: demo._id });
+
+    return successResponse(res, {
+      deleted: requestIds.length,
+      notificationsCleared: strayNotifications.deletedCount || 0,
+    });
   } catch (err) {
+    console.error('adminDeleteDemoRequests error:', err);
     return errorResponse(res, 'Failed to delete demo requests', 500);
   }
 };
