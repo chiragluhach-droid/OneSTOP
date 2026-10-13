@@ -32,16 +32,25 @@ const slaHoursFor = (stageKind, escalationConfig = {}) => {
 /**
  * Where the request sits after someone acts on it.
  *
- *   submitted                        → pending
- *   One Stop acts (in progress/fwd)  → in_progress
- *   a forwarded desk acts            → in_review
- *   anyone resolves                  → resolved
+ *   submitted                            → pending
+ *   One Stop marks it in progress        → in_progress
+ *   forwarded onward, by anyone          → in_review
+ *   a forwarded desk marks it in progress → in_review  (already under review)
+ *   anyone resolves                      → resolved
  *
- * So the student can tell "the desk has it" from "the dean is looking at it"
+ * `in_progress` means one specific thing: the One Stop desk is holding it and
+ * working on it themselves. The moment it is passed to a dean, HOD or director
+ * it becomes `in_review` and stays there until it is resolved — including when
+ * that person forwards it on again, or acknowledges it.
+ *
+ * So the student can tell "the front desk has it" from "a department is on it"
  * without being shown anybody's mailbox.
  */
 const nextRequestStatus = ({ stageKind, act }) => {
   if (act === 'resolved') return 'resolved';
+  // Forwarding hands it to a department, whoever did the forwarding.
+  if (act === 'forward') return 'in_review';
+  // Acknowledgement: only the desk's own counts as "in progress".
   return stageKind === STAGE_KIND.INTAKE ? 'in_progress' : 'in_review';
 };
 
