@@ -13,6 +13,12 @@ const adminLogin = async (req, res) => {
     const isValid = await admin.comparePassword(password);
     if (!isValid) return errorResponse(res, 'Invalid credentials', 401);
 
+    // The leadership console is a separate portal with its own door. Checked
+    // after the password so this never doubles as an account-role oracle.
+    if (admin.role === 'superadmin') {
+      return errorResponse(res, 'This account belongs to the Super Admin portal. Sign in there instead.', 403);
+    }
+
     const accessToken = signAccessToken({ id: admin._id, role: admin.role });
     const refreshToken = signRefreshToken({ id: admin._id, role: admin.role });
     admin.refreshToken = refreshToken;

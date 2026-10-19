@@ -47,23 +47,71 @@ const protectStaff = async (req, res, next) => {
   }
 };
 
+// The two consoles are separate systems, not one with two tiers.
+//
+//   admin       — runs the university day to day: staff, schools, categories,
+//                 settings, the app-version gate, announcements. It owns every
+//                 route below.
+//   superadmin   — the leadership console. Reads the whole university through
+//                 /admin/super-admin/* and changes nothing, so it is turned
+//                 away from the operational routes entirely.
+//
+// Shared session plumbing (logout) uses `protectAdminSession`, which takes
+// either, since both roles are Admin documents holding a refresh token.
+const loadAdmin = async (req, res, roles) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    errorResponse(res, 'No token provided', 401);
+    return null;
+  }
+  let decoded;
+  try {
+    decoded = verifyAccessToken(authHeader.split(' ')[1]);
+  } catch (err) {
+    errorResponse(res, 'Invalid or expired token', 401);
+    return null;
+  }
+  if (!roles.includes(decoded.role)) {
+    errorResponse(
+      res,
+      decoded.role === 'superadmin'
+        ? 'The Super Admin console is read-only. Sign in to the admin portal to make changes.'
+        : 'Admin access required',
+      403
+    );
+    return null;
+  }
+  const admin = await Admin.findById(decoded.id).select('-password -refreshToken');
+  if (!admin || !admin.isActive) {
+    errorResponse(res, 'Admin not found or inactive', 401);
+    return null;
+  }
+  // The token could predate a role change, so trust the stored role.
+  if (!roles.includes(admin.role)) {
+    errorResponse(res, 'Admin access required', 403);
+    return null;
+  }
+  return admin;
+};
+
 const protectAdmin = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return errorResponse(res, 'No token provided', 401);
-    }
-    const token = authHeader.split(' ')[1];
-    const decoded = verifyAccessToken(token);
-    if (decoded.role !== 'admin' && decoded.role !== 'superadmin') {
-      return errorResponse(res, 'Admin access required', 403);
-    }
-    const admin = await Admin.findById(decoded.id).select('-password -refreshToken');
-    if (!admin || !admin.isActive) {
-      return errorResponse(res, 'Admin not found or inactive', 401);
-    }
+    const admin = await loadAdmin(req, res, ['admin']);
+    if (!admin) return undefined;
     req.admin = admin;
-    next();
+    return next();
+  } catch (err) {
+    return errorResponse(res, 'Invalid or expired token', 401);
+  }
+};
+
+/** Either console's own session — used for logout only. */
+const protectAdminSession = async (req, res, next) => {
+  try {
+    const admin = await loadAdmin(req, res, ['admin', 'superadmin']);
+    if (!admin) return undefined;
+    req.admin = admin;
+    return next();
   } catch (err) {
     return errorResponse(res, 'Invalid or expired token', 401);
   }
@@ -126,4 +174,4 @@ const protectSuperAdmin = async (req, res, next) => {
   }
 };
 
-module.exports = { protect, protectStaff, protectAdmin, protectSuperAdmin, protectAny };
+module.exports = { protect, protectStaff, protectAdmin, protectAdminSession, protectSuperAdmin, protectAny };
