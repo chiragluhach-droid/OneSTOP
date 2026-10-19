@@ -7,6 +7,8 @@ const {
   getEscalation, updateEscalation,
   getReopen, updateReopen,
   getAppVersion, updateAppVersion,
+  getWorkingTime, updateWorkingTime,
+  getAutoReply, updateAutoReply,
 } = require('../controllers/settingController');
 
 // GET is public — the mobile app reads feature flags (and the minimum app
@@ -26,5 +28,13 @@ router.patch('/reopen', protectAdmin, updateReopen);
 // Minimum app version — admin only
 router.get('/app-version', protectAdmin, getAppVersion);
 router.patch('/app-version', protectAdmin, updateAppVersion);
+
+// Working days — admin only. Response windows skip whatever is set here.
+router.get('/working-time', protectAdmin, getWorkingTime);
+router.patch('/working-time', protectAdmin, updateWorkingTime);
+
+// Automatic acknowledgement to the student — admin only
+router.get('/auto-reply', protectAdmin, getAutoReply);
+router.patch('/auto-reply', protectAdmin, updateAutoReply);
 
 module.exports = router;

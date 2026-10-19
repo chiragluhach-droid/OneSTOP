@@ -9,7 +9,11 @@ const { resolveRecipients } = require('../utils/recipients');
 const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 const auditLog = require('../utils/auditLogger');
-const { getReopenConfig } = require('./settingController');
+const { getReopenConfig, getAutoReplyConfig, getEscalationConfig, getWorkingTimeConfig } = require('./settingController');
+const { buildAcknowledgementEmail } = require('../templates/acknowledgementEmail');
+const { sendEmail } = require('../services/emailService');
+const { addWorkingHours } = require('../config/workingTime');
+const { STAGE_KIND, slaHoursFor } = require('../config/sla');
 const { createIntakeStage } = require('../services/stageFactory');
 const { notify, notifyStaffByEmail } = require('../services/notifyService');
 const { labelForStage } = require('../services/ownerIdentity');
@@ -37,6 +41,43 @@ const serializeStagesForStudent = async (stages) =>
       return obj;
     })
   );
+
+/**
+ * The automatic reply from the One Stop desk, sent the moment a concern is
+ * raised. The wording is admin-editable; the ticket, the desk holding it and
+ * the response deadline are filled in here so the student has something
+ * concrete to hold the university to.
+ */
+const sendAcknowledgement = async ({ request, student, category }) => {
+  const [autoReply, escalation, workingTime] = await Promise.all([
+    getAutoReplyConfig(),
+    getEscalationConfig(),
+    getWorkingTimeConfig(),
+  ]);
+  if (!autoReply.enabled) return;
+
+  const hours = slaHoursFor(STAGE_KIND.INTAKE, escalation);
+  const dueAt = addWorkingHours(Date.now(), hours, workingTime);
+  const respondBy = new Date(dueAt).toLocaleString('en-IN', {
+    timeZone: workingTime.timezone || 'Asia/Kolkata',
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+
+  await sendEmail({
+    to: student.email,
+    subject: `[#${request.ticketId}] We have received your concern — MR One`,
+    htmlContent: buildAcknowledgementEmail({
+      studentName: student.name,
+      ticketId: request.ticketId,
+      subject: request.subject,
+      categoryName: category.name,
+      message: autoReply.message,
+      respondBy,
+      deskLabel: INTAKE_LABEL,
+    }),
+  });
+};
 
 const createRequest = async (req, res) => {
   try {
@@ -127,6 +168,12 @@ const createRequest = async (req, res) => {
         category,
         school,
       });
+
+      // The desk answers straight away, so nobody is left wondering whether
+      // their concern arrived. Never allowed to fail the submission — the
+      // request is already saved by this point.
+      await sendAcknowledgement({ request, student: req.user, category })
+        .catch((e) => console.warn('acknowledgement email failed:', e.message || e));
     }
 
 

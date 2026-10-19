@@ -8,6 +8,9 @@ const { getEscalationConfig } = require('../controllers/settingController');
 const { STAGE_KIND, slaHoursFor } = require('../config/sla');
 const { notifyStaffByEmail } = require('./notifyService');
 const { labelForStage } = require('./ownerIdentity');
+const { escalationTargetFor } = require('./reportingChain');
+const { getWorkingTimeConfig } = require('../controllers/settingController');
+const { addWorkingHours } = require('../config/workingTime');
 
 // How often to look for overdue stages. The shortest window in play is the
 // intake desk's few hours, so a 15-minute sweep is precise enough and cheap —
@@ -49,11 +52,22 @@ const windowHoursFor = (stage, config) => {
 const clockStartedAt = (stage) =>
   new Date(stage.inProgressAt || stage.emailSentAt).getTime();
 
-/** Who should be told, for a stage that may have been created before settings existed. */
-const recipientsFor = (stage, config) => {
-  if (stage.escalationRecipients && stage.escalationRecipients.length) return stage.escalationRecipients;
-  if (config.enabled && config.recipientEmail) return [config.recipientEmail];
-  return [];
+/**
+ * Who should be told, and why.
+ *
+ * The reporting chain is resolved now rather than read off the stage, so a
+ * change to the escalation settings applies to concerns already in flight.
+ * Whatever the stage was created with is the fallback for the case where the
+ * chain can find nobody.
+ */
+const escalationTarget = async (stage, config, request, school) => {
+  const target = await escalationTargetFor({ stage, request, config, school });
+  if (target.emails.length) return target;
+
+  const stored = stage.escalationRecipients || [];
+  if (stored.length) return { ...target, emails: stored };
+  if (config.enabled && config.recipientEmail) return { ...target, emails: [config.recipientEmail] };
+  return { ...target, emails: [] };
 };
 
 /**
@@ -64,7 +78,10 @@ const recipientsFor = (stage, config) => {
  */
 const sweepOverdueStages = async () => {
   const now = Date.now();
-  const config = await getEscalationConfig();
+  const [config, workingTime] = await Promise.all([
+    getEscalationConfig(),
+    getWorkingTimeConfig(),
+  ]);
 
   const candidates = await WorkflowStage.find({
     status: 'pending',
@@ -78,7 +95,9 @@ const sweepOverdueStages = async () => {
     const hours = windowHoursFor(stage, config);
     if (!hours) continue;
 
-    const dueAt = clockStartedAt(stage) + hours * 60 * 60 * 1000;
+    // Counted in working time, so a Friday evening concern is not overdue
+    // before Monday has even started.
+    const dueAt = addWorkingHours(clockStartedAt(stage), hours, workingTime);
     if (now < dueAt) continue;
 
     try {
@@ -96,7 +115,8 @@ const sweepOverdueStages = async () => {
       ]);
       if (!student || !category || !school) continue;
 
-      const recipients = recipientsFor(stage, config);
+      const target = await escalationTarget(stage, config, request, school);
+      const recipients = target.emails;
       if (!recipients.length) {
         // Nothing to send and nothing to wait for — stamp it so this stage is
         // not rescanned on every sweep for the rest of its life.
@@ -104,11 +124,11 @@ const sweepOverdueStages = async () => {
         continue;
       }
 
-      // Older stages may carry no recipients of their own; hand the sender a
-      // stage object that does, without persisting the settings snapshot.
-      const stageForEmail = stage.escalationRecipients?.length
-        ? stage
-        : Object.assign(stage.toObject(), { escalationRecipients: recipients });
+      // The sender reads the recipients off the stage, so hand it a copy
+      // carrying the ones the reporting chain just resolved. Not persisted:
+      // the stage keeps the snapshot it was created with, and the chain is
+      // re-resolved from live settings on every sweep.
+      const stageForEmail = Object.assign(stage.toObject(), { escalationRecipients: recipients });
 
       await sendEscalationEmail({
         request,
@@ -117,6 +137,8 @@ const sweepOverdueStages = async () => {
         category,
         school,
         hours,
+        escalatedTo: target.label,
+        heldBy: target.ownerLabel,
       });
 
       // Stamped even if every recipient was filtered out (the owner being the
@@ -128,7 +150,7 @@ const sweepOverdueStages = async () => {
       // Push the alert to the escalation contact, and to whoever is sitting on
       // it — a nudge on the phone is what actually gets an overdue concern
       // picked up. Never allowed to fail the sweep.
-      const ownerLabel = await labelForStage(stage);
+      const ownerLabel = target.ownerLabel || (await labelForStage(stage));
       const summary = `#${request.ticketId} has been waiting ${hours}h with ${ownerLabel}`;
       await Promise.all([
         ...recipients.map((email) => notifyStaffByEmail(email, {

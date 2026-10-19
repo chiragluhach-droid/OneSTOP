@@ -1,6 +1,7 @@
 const Setting = require('../models/Setting');
 const { INTAKE_EMAIL, INTAKE_LABEL } = require('../config/intake');
 const { DEFAULT_INTAKE_HOURS, DEFAULT_FORWARDED_HOURS } = require('../config/sla');
+const { DEFAULT_WORKING_TIME } = require('../config/workingTime');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
 
 // ── Default escalation / SLA settings ──
@@ -14,6 +15,28 @@ const DEFAULT_ESCALATION = {
   intakeHours: DEFAULT_INTAKE_HOURS,
   forwardedHours: DEFAULT_FORWARDED_HOURS,
   afterHours: DEFAULT_FORWARDED_HOURS,
+  // Route an overdue concern to the holder's own reporting authority (an HOD's
+  // dean, say) rather than sending every escalation to the same mailbox.
+  reportingChain: true,
+  // Reached only when the authority above is itself overdue, so the office at
+  // the top hears about exceptions rather than about everything.
+  finalAuthorityEmail: '',
+  finalAuthorityLabel: 'Vice Chancellor',
+};
+
+// ── Working days ──
+// Response windows are counted in working time, so a concern raised on Friday
+// is not overdue before the university reopens on Monday.
+const DEFAULT_WORKING = { ...DEFAULT_WORKING_TIME };
+
+// ── Automatic acknowledgement ──
+// Sent to the student the moment a concern reaches the One Stop desk, so
+// nobody is left wondering whether their mail arrived.
+const DEFAULT_AUTO_REPLY = {
+  enabled: true,
+  message:
+    'Your concern has been received by the One Stop desk and is being processed. '
+    + 'You will be notified as soon as there is an update.',
 };
 
 // ── Default reopen policy ──
@@ -47,6 +70,8 @@ const writeConfig = async (key, value) => {
 const getEscalationConfig = () => readConfig('escalation', DEFAULT_ESCALATION);
 const getReopenConfig = () => readConfig('reopen', DEFAULT_REOPEN);
 const getAppVersionConfig = () => readConfig('appVersion', DEFAULT_APP_VERSION);
+const getWorkingTimeConfig = () => readConfig('workingTime', DEFAULT_WORKING);
+const getAutoReplyConfig = () => readConfig('autoReply', DEFAULT_AUTO_REPLY);
 
 // ── Feature flags (public read) ──
 
@@ -110,7 +135,10 @@ const hoursError = (name, value) =>
 // PATCH /api/settings/escalation — admin only
 const updateEscalation = async (req, res) => {
   try {
-    const { enabled, recipientEmail, recipientLabel, intakeHours, forwardedHours } = req.body;
+    const {
+      enabled, recipientEmail, recipientLabel, intakeHours, forwardedHours,
+      reportingChain, finalAuthorityEmail, finalAuthorityLabel,
+    } = req.body;
 
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       return errorResponse(res, 'enabled must be a boolean', 400);
@@ -119,6 +147,12 @@ const updateEscalation = async (req, res) => {
     if (badHours) return errorResponse(res, badHours, 400);
     if (recipientEmail !== undefined && typeof recipientEmail !== 'string') {
       return errorResponse(res, 'recipientEmail must be a string', 400);
+    }
+    if (reportingChain !== undefined && typeof reportingChain !== 'boolean') {
+      return errorResponse(res, 'reportingChain must be a boolean', 400);
+    }
+    if (finalAuthorityEmail !== undefined && typeof finalAuthorityEmail !== 'string') {
+      return errorResponse(res, 'finalAuthorityEmail must be a string', 400);
     }
 
     const current = await getEscalationConfig();
@@ -131,6 +165,13 @@ const updateEscalation = async (req, res) => {
       // Kept in step with the forwarded window so anything still reading the
       // old single-value field behaves sensibly.
       afterHours: forwardedHours !== undefined ? forwardedHours : current.forwardedHours,
+      reportingChain: reportingChain !== undefined ? reportingChain : current.reportingChain,
+      finalAuthorityEmail: finalAuthorityEmail !== undefined
+        ? finalAuthorityEmail.trim().toLowerCase()
+        : current.finalAuthorityEmail,
+      finalAuthorityLabel: finalAuthorityLabel !== undefined
+        ? String(finalAuthorityLabel).trim()
+        : current.finalAuthorityLabel,
     };
 
     const value = await writeConfig('escalation', updated);
@@ -242,10 +283,97 @@ const updateAppVersion = async (req, res) => {
   }
 };
 
+// ── Working days ──
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET /api/settings/working-time — admin only
+const getWorkingTime = async (req, res) => {
+  try {
+    const workingTime = await getWorkingTimeConfig();
+    return successResponse(res, { workingTime }, 'Working days fetched');
+  } catch (err) {
+    return errorResponse(res, 'Failed to fetch working days', 500);
+  }
+};
+
+// PATCH /api/settings/working-time — admin only
+const updateWorkingTime = async (req, res) => {
+  try {
+    const { enabled, workingDays, holidays } = req.body;
+
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return errorResponse(res, 'enabled must be a boolean', 400);
+    }
+    if (workingDays !== undefined) {
+      const ok = Array.isArray(workingDays)
+        && workingDays.length > 0
+        && workingDays.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+      if (!ok) {
+        return errorResponse(res, 'workingDays must be a non-empty array of day numbers (0 Sunday – 6 Saturday)', 400);
+      }
+    }
+    if (holidays !== undefined) {
+      const ok = Array.isArray(holidays) && holidays.every((d) => typeof d === 'string' && DATE_RE.test(d));
+      if (!ok) return errorResponse(res, 'holidays must be an array of YYYY-MM-DD dates', 400);
+    }
+
+    const current = await getWorkingTimeConfig();
+    const value = await writeConfig('workingTime', {
+      ...current,
+      enabled: enabled !== undefined ? enabled : current.enabled,
+      workingDays: workingDays !== undefined ? [...new Set(workingDays)].sort() : current.workingDays,
+      holidays: holidays !== undefined ? [...new Set(holidays)].sort() : current.holidays,
+    });
+
+    return successResponse(res, { workingTime: value }, 'Working days updated');
+  } catch (err) {
+    return errorResponse(res, 'Failed to update working days', 500);
+  }
+};
+
+// ── Automatic acknowledgement ──
+
+// GET /api/settings/auto-reply — admin only
+const getAutoReply = async (req, res) => {
+  try {
+    const autoReply = await getAutoReplyConfig();
+    return successResponse(res, { autoReply }, 'Auto-reply fetched');
+  } catch (err) {
+    return errorResponse(res, 'Failed to fetch auto-reply', 500);
+  }
+};
+
+// PATCH /api/settings/auto-reply — admin only
+const updateAutoReply = async (req, res) => {
+  try {
+    const { enabled, message } = req.body;
+
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return errorResponse(res, 'enabled must be a boolean', 400);
+    }
+    if (message !== undefined && (typeof message !== 'string' || message.trim().length < 10 || message.length > 1000)) {
+      return errorResponse(res, 'message must be between 10 and 1000 characters', 400);
+    }
+
+    const current = await getAutoReplyConfig();
+    const value = await writeConfig('autoReply', {
+      enabled: enabled !== undefined ? enabled : current.enabled,
+      message: message !== undefined ? message.trim() : current.message,
+    });
+
+    return successResponse(res, { autoReply: value }, 'Auto-reply updated');
+  } catch (err) {
+    return errorResponse(res, 'Failed to update auto-reply', 500);
+  }
+};
+
 module.exports = {
   getFeatures, updateFeatures,
   getRouting,
   getEscalation, updateEscalation, getEscalationConfig,
   getReopen, updateReopen, getReopenConfig,
   getAppVersion, updateAppVersion, getAppVersionConfig,
+  getWorkingTime, updateWorkingTime, getWorkingTimeConfig,
+  getAutoReply, updateAutoReply, getAutoReplyConfig,
 };

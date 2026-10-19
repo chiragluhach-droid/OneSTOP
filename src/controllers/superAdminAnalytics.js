@@ -5,8 +5,9 @@ const Staff = require('../models/Staff');
 const School = require('../models/School');
 const Category = require('../models/Category');
 const { successResponse, errorResponse } = require('../utils/apiResponse');
-const { getEscalationConfig } = require('./settingController');
+const { getEscalationConfig, getWorkingTimeConfig } = require('./settingController');
 const { STAGE_KIND, slaHoursFor } = require('../config/sla');
+const { workingMsBetween } = require('../config/workingTime');
 
 // Analytics the executive console needs that the directory endpoints don't
 // cover: movement over time, whether the response windows are actually being
@@ -95,7 +96,10 @@ const getTrends = async (req, res) => {
  */
 const getSlaReport = async (req, res) => {
   try {
-    const config = await getEscalationConfig();
+    const [config, workingTime] = await Promise.all([
+      getEscalationConfig(),
+      getWorkingTimeConfig(),
+    ]);
     const intakeMs = slaHoursFor(STAGE_KIND.INTAKE, config) * MS_HOUR;
     const forwardedMs = slaHoursFor(STAGE_KIND.FORWARDED, config) * MS_HOUR;
 
@@ -119,7 +123,9 @@ const getSlaReport = async (req, res) => {
       const windowMs = kind === 'intake' ? intakeMs : forwardedMs;
       const started = new Date(st.inProgressAt || st.emailSentAt).getTime();
       const ended = st.actionTakenAt ? new Date(st.actionTakenAt).getTime() : null;
-      const elapsed = (ended ?? now) - started;
+      // Measured the same way the deadline is set, or a concern that sat over
+      // a weekend would read as breached against a window it never had.
+      const elapsed = workingMsBetween(started, ended ?? now, workingTime);
 
       b.total += 1;
       b.totalHours += elapsed / MS_HOUR;
@@ -157,7 +163,11 @@ const getSlaReport = async (req, res) => {
     };
 
     return successResponse(res, {
-      windows: { intakeHours: bucket.intake.windowHours, forwardedHours: bucket.forwarded.windowHours },
+      windows: {
+        intakeHours: bucket.intake.windowHours,
+        forwardedHours: bucket.forwarded.windowHours,
+        workingDaysOnly: workingTime.enabled !== false,
+      },
       intake: shape(bucket.intake),
       forwarded: shape(bucket.forwarded),
       overall: {
