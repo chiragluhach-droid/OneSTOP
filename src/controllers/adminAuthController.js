@@ -60,4 +60,34 @@ const adminLogout = async (req, res) => {
   }
 };
 
-module.exports = { adminLogin, adminRefresh, adminLogout };
+const superAdminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return errorResponse(res, 'Email and password required', 400);
+
+    const admin = await Admin.findOne({ email: email.toLowerCase().trim() });
+    if (!admin || !admin.isActive) return errorResponse(res, 'Invalid credentials', 401);
+
+    if (admin.role !== 'superadmin') {
+      return errorResponse(res, 'Access denied. Super Admin privileges required.', 403);
+    }
+
+    const isValid = await admin.comparePassword(password);
+    if (!isValid) return errorResponse(res, 'Invalid credentials', 401);
+
+    const accessToken = signAccessToken({ id: admin._id, role: admin.role });
+    const refreshToken = signRefreshToken({ id: admin._id, role: admin.role });
+    admin.refreshToken = refreshToken;
+    await admin.save();
+
+    return successResponse(res, {
+      accessToken,
+      refreshToken,
+      admin: { _id: admin._id, name: admin.name, email: admin.email, role: admin.role },
+    }, 'Super Admin login successful');
+  } catch (err) {
+    return errorResponse(res, 'Login failed', 500);
+  }
+};
+
+module.exports = { adminLogin, adminRefresh, adminLogout, superAdminLogin };

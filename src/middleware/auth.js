@@ -100,4 +100,30 @@ const protectAny = async (req, res, next) => {
   }
 };
 
-module.exports = { protect, protectStaff, protectAdmin, protectAny };
+// Super-admin only. The super-admin console exposes every student record, every
+// staff member and every request in the university, so `protectAdmin` is not
+// enough here — that one also admits role 'admin'.
+const protectSuperAdmin = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return errorResponse(res, 'No token provided', 401);
+    }
+    const decoded = verifyAccessToken(authHeader.split(' ')[1]);
+    if (decoded.role !== 'superadmin') {
+      return errorResponse(res, 'Super Admin privileges required', 403);
+    }
+    const admin = await Admin.findById(decoded.id).select('-password -refreshToken');
+    if (!admin || !admin.isActive) return errorResponse(res, 'Admin not found or inactive', 401);
+    if (admin.role !== 'superadmin') {
+      // The token could predate a demotion.
+      return errorResponse(res, 'Super Admin privileges required', 403);
+    }
+    req.admin = admin;
+    next();
+  } catch (err) {
+    return errorResponse(res, 'Invalid or expired token', 401);
+  }
+};
+
+module.exports = { protect, protectStaff, protectAdmin, protectSuperAdmin, protectAny };
